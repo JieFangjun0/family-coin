@@ -16,7 +16,7 @@ BURN_ACCOUNT = "JFJ_BURN"      # 用于表示“销毁”的目的地
 ESCROW_ACCOUNT = "JFJ_ESCROW"  # (新增) 用于托管求购资金
 
 # 默认设置
-DEFAULT_INVITATION_QUOTA = 5
+DEFAULT_INVITATION_QUOTA = 3
 
 @contextmanager
 def get_db_connection():
@@ -39,7 +39,7 @@ def init_db():
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # --- 用户表 ---
+        # --- 用户表 (核心修改 1: 增加 private_key_pem 字段) ---
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             public_key TEXT PRIMARY KEY,
@@ -47,7 +47,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_active BOOLEAN DEFAULT 1,
             invited_by TEXT,
-            invitation_quota INTEGER DEFAULT 0
+            invitation_quota INTEGER DEFAULT 0,
+            private_key_pem TEXT
         )
         ''')
         
@@ -142,7 +143,8 @@ def set_setting(key: str, value: str) -> bool:
             print(f"更新设置失败: {e}")
             return False
 
-def register_user(username: str, public_key: str, invitation_code: str) -> (bool, str):
+# 核心修改 2: 增加 private_key 参数，用于存储
+def register_user(username: str, public_key: str, private_key: str, invitation_code: str) -> (bool, str):
     """注册一个新用户，需要一次性邀请码。"""
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
@@ -169,9 +171,10 @@ def register_user(username: str, public_key: str, invitation_code: str) -> (bool
             default_quota_str = get_setting('default_invitation_quota')
             default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
             
+            # 核心修改 3: 在 INSERT 语句中增加私钥字段
             cursor.execute(
-                "INSERT INTO users (public_key, username, invited_by, invitation_quota) VALUES (?, ?, ?, ?)",
-                (public_key, username, inviter_key, default_quota)
+                "INSERT INTO users (public_key, username, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?)",
+                (public_key, username, inviter_key, default_quota, private_key)
             )
             
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
@@ -771,7 +774,8 @@ def count_users() -> int:
         result = cursor.fetchone()
         return result[0] if result else 0
 
-def create_genesis_user(username: str, public_key: str) -> (bool, str):
+# 核心修改 4: 增加 private_key 参数
+def create_genesis_user(username: str, public_key: str, private_key: str) -> (bool, str):
     """创建第一个（创世）管理员用户。"""
     if count_users() > 0:
         return False, "系统已经初始化，无法创建创世用户。"
@@ -781,9 +785,10 @@ def create_genesis_user(username: str, public_key: str) -> (bool, str):
             cursor = conn.cursor()
             inv_quota = 999999 # 无限邀请
 
+            # 核心修改 5: 在 INSERT 语句中增加私钥字段
             cursor.execute(
-                "INSERT INTO users (public_key, username, invited_by, invitation_quota) VALUES (?, ?, ?, ?)",
-                (public_key, username, "GENESIS", inv_quota)
+                "INSERT INTO users (public_key, username, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?)",
+                (public_key, username, "GENESIS", inv_quota, private_key)
             )
 
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
@@ -793,3 +798,12 @@ def create_genesis_user(username: str, public_key: str) -> (bool, str):
         except Exception as e:
             conn.rollback()
             return False, f"创建创世用户失败: {e}"
+
+# 核心修改 6: (新增函数) 增加管理员查询用户私钥的功能
+def admin_get_user_private_key(public_key: str) -> str:
+    """(管理员功能) 获取用户的私钥。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT private_key_pem FROM users WHERE public_key = ?", (public_key,))
+        result = cursor.fetchone()
+        return result['private_key_pem'] if result and result['private_key_pem'] else None

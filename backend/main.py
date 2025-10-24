@@ -101,6 +101,11 @@ class AdminSetUserActiveStatusRequest(BaseModel):
 
 class AdminBalancesResponse(BaseModel):
     balances: List[dict]
+
+# 核心修改 1: (新增模型) 用于返回管理员查询的私钥
+class AdminPrivateKeyResponse(BaseModel):
+    public_key: str
+    private_key: str
     
 class InvitationCodeResponse(BaseModel):
     code: str
@@ -190,7 +195,13 @@ def api_genesis_register(request: GenesisRegisterRequest):
         raise HTTPException(status_code=400, detail="用户名至少需要3个字符")
     
     private_key, public_key = generate_key_pair()
-    success, detail = ledger.create_genesis_user(username=request.username, public_key=public_key)
+    
+    # 核心修改 2: 调用 ledger 函数时传入 private_key
+    success, detail = ledger.create_genesis_user(
+        username=request.username, 
+        public_key=public_key,
+        private_key=private_key
+    )
 
     if not success:
         raise HTTPException(status_code=500, detail=detail)
@@ -234,9 +245,11 @@ def api_register_user(request: UserRegisterRequest):
         
     private_key, public_key = generate_key_pair()
     
+    # 核心修改 3: 调用 ledger 函数时传入 private_key
     success, detail = ledger.register_user(
         username=request.username, 
         public_key=public_key,
+        private_key=private_key,
         invitation_code=request.invitation_code.upper() # 邀请码不区分大小写
     )
     
@@ -493,6 +506,15 @@ def api_admin_adjust_user_quota(request: AdminAdjustUserQuotaRequest):
     if not success:
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
+
+# 核心修改 4: (新增API) 增加管理员查询用户私钥的端点
+@app.get("/admin/private_key/", response_model=AdminPrivateKeyResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_get_private_key(public_key: str):
+    """(管理员) 获取指定用户的私钥。"""
+    private_key = ledger.admin_get_user_private_key(public_key)
+    if not private_key:
+        raise HTTPException(status_code=404, detail="未找到用户或该用户没有存储私钥。")
+    return AdminPrivateKeyResponse(public_key=public_key, private_key=private_key)
 
 @app.post("/admin/nuke_system", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_nuke_system():
