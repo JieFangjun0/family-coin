@@ -31,7 +31,6 @@ def render(st, nft, balance, api_call_func, create_signed_message_func):
     
     destroy_ts = data.get('destroy_timestamp', 0)
     
-    # --- 核心修改：如果已过期，提供销毁按钮 ---
     if time.time() > destroy_ts:
         st.info("“这个愿望已经随着时间消散了。”")
         with st.container(border=True):
@@ -42,12 +41,16 @@ def render(st, nft, balance, api_call_func, create_signed_message_func):
             st.warning("它的数据仍保留在链上，点击下方按钮可将其彻底清除。")
             if st.button("✨ 让它彻底消失", key=f"destroy_{nft_id}", type="primary"):
                 with st.spinner("正在施展遗忘咒..."):
+                    
+                    # <<< --- 核心修复：在这里明确添加 timestamp --- >>>
                     message_dict = {
                         "owner_key": nft['owner_key'],
                         "nft_id": nft_id,
                         "action": "destroy",
-                        "action_data": {} # 此动作不需要额外数据
+                        "action_data": {}, # 此动作不需要额外数据
+                        "timestamp": time.time() # 确保签名的消息体与后端模型完全匹配
                     }
+                    
                     signed_payload = create_signed_message_func(message_dict)
                     if signed_payload:
                         res_data, error = api_call_func('POST', '/nfts/action', payload=signed_payload)
@@ -55,7 +58,7 @@ def render(st, nft, balance, api_call_func, create_signed_message_func):
                             st.error(f"销毁失败: {error}")
                         else:
                             st.success(f"销毁成功！{res_data.get('detail')}")
-                            time.sleep(1) # 稍作停留，让用户看到成功信息
+                            time.sleep(1) 
                             st.cache_data.clear()
                             st.rerun()
         return
