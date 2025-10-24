@@ -1,14 +1,23 @@
 # backend/nft_logic/__init__.py
 
 from .base import NFTLogicHandler
-from .time_capsule import TimeCapsuleHandler
+# 移除旧的 time_capsule 导入
+# from .time_capsule import TimeCapsuleHandler
+
+# <<< 核心修改: 导入新的“秘密愿望”处理器 >>>
+from .secret_wish import SecretWishHandler
+
 
 # <<< NFT 架构升级: 插件注册表 >>>
 # 每当创建一个新的 NFT 逻辑处理器，都需要在这里注册。
 # 键 (key) 是在 API 和数据库中使用的 nft_type 字符串。
 # 值 (value) 是对应的 Handler 类。
 NFT_HANDLERS = {
-    "TIME_CAPSULE": TimeCapsuleHandler,
+    # "TIME_CAPSULE": TimeCapsuleHandler, # <- 移除这一行
+    
+    # <<< 核心修改: 注册新的处理器 >>>
+    "SECRET_WISH": SecretWishHandler,
+
     # 当你创建 bio_dna.py后，在这里添加:
     # "BIO_DNA": BioDNAHandler,
 }
