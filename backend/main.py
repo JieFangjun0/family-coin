@@ -610,6 +610,29 @@ def api_admin_mint_nft(request: AdminMintNFTRequest):
         
     return SuccessResponse(detail=f"成功为用户 {request.to_key[:10]}... 铸造了 NFT (ID: {nft_id[:8]}...)！消息: {detail}")
 
+@app.post("/admin/issue", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_issue(request: AdminIssueRequest):
+    """(管理员) 增发货币。"""
+    success, detail = ledger.admin_issue_coins(
+        to_key=request.to_key,
+        amount=request.amount,
+        note=request.note
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+@app.post("/admin/burn", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_burn(request: AdminBurnRequest):
+    """(管理员) 销毁货币。"""
+    success, detail = ledger.admin_burn_coins(
+        from_key=request.from_key,
+        amount=request.amount,
+        note=request.note
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
 @app.get("/admin/balances", response_model=AdminBalancesResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_get_all_balances():
     """(管理员) 监控所有用户的余额。"""
