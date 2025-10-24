@@ -22,9 +22,9 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 TIMEZONE = pytz.timezone('Asia/Shanghai')
 ADMIN_UI_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", "j")
 
-st.set_page_config(page_title="FamilyCoin V2.2", layout="wide")
-st.title("🪙 FamilyCoin V2.2 (家庭货币)")
-st.caption(f"一个带邀请制和商店的中心化玩具货币系统。后端 API: `{BACKEND_URL}`")
+st.set_page_config(page_title="FamilyCoin V1.0", layout="wide")
+st.title("🪙 FamilyCoin V1.0 (家庭币)")
+st.caption(f"一个带邀请制和商店的中心化货币系统。（仅供娱乐，请勿用作非法用途！）")
 
 # --- 会话状态管理 (Session State) ---
 def init_session_state():
@@ -168,7 +168,6 @@ def create_signed_message(message_dict):
     }
 
 # --- 创世用户设置 ---
-# ... (这部分视图代码不变，省略)
 def show_genesis_setup():
     """显示首次运行时的创世用户注册界面。"""
     st.header("🚀 欢迎使用 FamilyCoin - 首次系统设置")
@@ -200,7 +199,7 @@ def show_genesis_setup():
             username = st.text_input("输入创世用户的用户名", "admin")
             
             genesis_password = st.text_input(
-                "输入创世密码 (在 `backend/main.py` 中设置)", 
+                "输入创世密码", 
                 type="password",
                 help="这是在代码中预设的，用于验证首次操作的密码。"
             )
@@ -681,7 +680,6 @@ def show_main_app():
     if is_admin:
         with tabs[3]:
             st.header("管理员面板")
-            # ... (解锁逻辑不变)
             if not st.session_state.admin_ui_unlocked:
                 st.info("这是一个轻量级的UI锁，防止误操作。")
                 with st.form("admin_unlock_form"):
@@ -693,24 +691,26 @@ def show_main_app():
                         else:
                             st.error("密码错误")
             else:
-                # ... (管理员面板剩余代码不变, 但有一处小修改)
                 st.success("管理员UI已解锁。")
                 if st.button("锁定UI"):
                     st.session_state.admin_ui_unlocked = False
                     st.rerun()
 
                 st.warning("你正在进行管理员操作。真正的API安全由后端的 Admin Secret 保证。")
-                admin_secret = st.text_input("请输入你的后端 Admin Secret", type="password", key="admin_secret_input")
+                # 这个输入框现在的作用仅仅是让用户能把密码填入 st.session_state.admin_secret_input
+                st.text_input("请输入你的后端 Admin Secret", type="password", key="admin_secret_input")
                 
-                if not admin_secret:
-                    st.info("请输入 Admin Secret (在 backend/main.py 中设置) 以启用操作。")
+                # 直接从 session_state 读取
+                # .get() 方法可以安全地处理密钥不存在的情况
+                if not st.session_state.get("admin_secret_input"):
+                    st.info("请输入 Admin Secret (通过环境变量 ADMIN_SECRET_KEY 设置) 以启用操作。")
                 else:
-                    admin_headers = {"X-Admin-Secret": admin_secret}
+                    # 始终从 session_state 构建 headers
+                    admin_headers = {"X-Admin-Secret": st.session_state.get("admin_secret_input", "")}
                     user_dict = get_all_users_dict(force_refresh=True) 
                     user_options = sorted(list(user_dict.keys()))
                     admin_issue_tab, admin_manage_tab, admin_settings_tab = st.tabs(["货币发行", "用户管理", "系统设置"])
                     
-                    # ... (货币发行 Tab 不变)
                     with admin_issue_tab:
                         st.subheader("增发货币 (Mint)")
                         with st.form("mint_form"):
