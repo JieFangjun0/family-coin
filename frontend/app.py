@@ -730,7 +730,7 @@ def show_main_app():
                 admin_secret = st.text_input("请输入你的后端 Admin Secret", type="password", key="admin_secret_input")
                 
                 if not admin_secret:
-                    st.info("请输入 Admin Secret (在 backend/main.py 中设置) 以启用操作。")
+                    st.info("请输入 Admin Secret以启用操作。")
                 else:
                     admin_headers = {"X-Admin-Secret": admin_secret}
                     user_dict = get_all_users_dict(force_refresh=True) 
@@ -904,7 +904,7 @@ def show_main_app():
                             mint_info = get_mint_info_for_type(selected_nft_type)
                             
                             if mint_info["help_text"]:
-                                st.help(mint_info["help_text"])
+                                st.info(mint_info["help_text"])
                                 
                             initial_data_str = st.text_area(
                                 "初始数据", 

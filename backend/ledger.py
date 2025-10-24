@@ -163,7 +163,17 @@ def get_nft_by_id(nft_id: str) -> dict:
     """根据 ID 获取单个 NFT 的详细信息。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM nfts WHERE nft_id = ?", (nft_id,))
+        cursor.execute(
+            """
+            SELECT 
+                nft_id, owner_key, nft_type, data, 
+                CAST(strftime('%s', created_at) AS REAL) as created_at,
+                status
+            FROM nfts 
+            WHERE nft_id = ?
+            """,
+            (nft_id,)
+        )
         nft = cursor.fetchone()
         if not nft:
             return None
@@ -175,7 +185,18 @@ def get_nfts_by_owner(owner_key: str) -> list:
     """获取指定所有者的所有 NFT。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM nfts WHERE owner_key = ? ORDER BY created_at DESC", (owner_key,))
+        cursor.execute(
+            """
+            SELECT 
+                nft_id, owner_key, nft_type, data, 
+                CAST(strftime('%s', created_at) AS REAL) as created_at,
+                status
+            FROM nfts 
+            WHERE owner_key = ? 
+            ORDER BY created_at DESC
+            """,
+            (owner_key,)
+        )
         nfts = []
         for row in cursor.fetchall():
             nft_dict = dict(row)
