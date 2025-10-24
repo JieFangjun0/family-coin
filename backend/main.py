@@ -413,7 +413,7 @@ def api_get_nft_details(nft_id: str):
         raise HTTPException(status_code=404, detail="未找到该 NFT")
     return NFTResponse(**nft)
 
-@app.post("/nfts/action", response_model=SuccessResponse, tags=["NFT"])
+app.post("/nfts/action", response_model=SuccessResponse, tags=["NFT"])
 def api_perform_nft_action(request: NFTActionRequest):
     """(需签名) 对一个 NFT 执行一个动作 (如 '揭示')。"""
     message = get_verified_nft_action_message(request, NFTActionMessage)
@@ -421,6 +421,10 @@ def api_perform_nft_action(request: NFTActionRequest):
     nft = ledger.get_nft_by_id(message.nft_id)
     if not nft or nft['owner_key'] != message.owner_key:
         raise HTTPException(status_code=404, detail="未找到 NFT 或你不是所有者")
+
+    # 核心修改点：增加对NFT状态的检查，只允许对活跃的NFT进行操作
+    if nft.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=400, detail="该 NFT 当前不是活跃状态，无法执行操作")
 
     handler = get_handler(nft['nft_type'])
     if not handler:
@@ -434,7 +438,12 @@ def api_perform_nft_action(request: NFTActionRequest):
     if not success:
         raise HTTPException(status_code=500, detail=detail)
 
-    update_success, update_detail = ledger.update_nft(message.nft_id, updated_data)
+    # --- 框架增强 ---
+    # 检查插件是否请求变更NFT的状态
+    new_status = updated_data.pop('__new_status__', None)
+
+    # 调用ledger更新数据，如果new_status存在，则一并更新状态
+    update_success, update_detail = ledger.update_nft(message.nft_id, updated_data, new_status)
     if not update_success:
         raise HTTPException(status_code=500, detail=f"执行成功但数据更新失败: {update_detail}")
 
@@ -443,6 +452,10 @@ def api_perform_nft_action(request: NFTActionRequest):
 # <<< 核心修改: 移除所有旧的 /shop 接口 >>>
 
 # <<< 新增功能: 市场接口 (Market API) >>>
+@app.get("/nfts/types", response_model=List[str], tags=["NFT"])
+def api_get_public_nft_types():
+    """获取所有已注册的、可公开查询的 NFT 类型。"""
+    return get_available_nft_types()
 @app.get("/market/listings", tags=["Market"])
 def api_get_market_listings(listing_type: str, exclude_owner: Optional[str] = None):
     """获取市场上的挂单列表 ('SALE', 'AUCTION', 'SEEK')。"""

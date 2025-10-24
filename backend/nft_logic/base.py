@@ -42,7 +42,7 @@ class NFTLogicHandler(ABC):
         """
         pass
     
-    # <<< 新增功能: 商店配置接口 >>>
+    # <<< 商店配置接口 >>>
     @classmethod
     def get_shop_config(cls) -> dict:
         """
@@ -62,3 +62,15 @@ class NFTLogicHandler(ABC):
         }
         """
         return {"creatable": False}
+    
+    # <<< --- “可交易性”检查接口 --- >>>
+    def is_tradable(self, nft: dict) -> (bool, str):
+        """
+        (可选实现) 检查该NFT当前是否满足特定类型的交易条件。
+        这个检查发生在所有通用检查（如所有权、状态）之后。
+        :param nft: 从数据库中获取的完整 NFT 对象。
+        :return: (是否可交易, 消息)。
+        """
+        # 默认情况下，所有NFT都是可交易的。
+        # 只有像“秘密愿望”这样有时间限制的NFT才需要重写此方法。
+        return True, "OK"

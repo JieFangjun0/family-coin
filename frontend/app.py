@@ -1,5 +1,3 @@
-# frontend/app.py
-
 import streamlit as st
 import requests
 import json
@@ -309,7 +307,7 @@ def show_login_register():
                                 st.session_state.new_user_info = data
                                 st.rerun()
 
-# --- 数据获取辅助函数 ---
+# --- 数据获取与格式化辅助函数 ---
 
 def get_user_details(force_refresh=False):
     """获取并缓存当前用户的详细信息。"""
@@ -347,6 +345,30 @@ def format_dt(timestamp):
     """格式化UTC时间戳为本地时间字符串。"""
     if not timestamp: return "N/A"
     return datetime.fromtimestamp(timestamp, TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
+
+# --- 新增：数据格式化与翻译 ---
+LISTING_TYPE_MAP = {
+    "SALE": "一口价",
+    "AUCTION": "拍卖",
+    "SEEK": "求购"
+}
+
+STATUS_MAP = {
+    "ACTIVE": "进行中",
+    "PENDING": "待处理",
+    "COMPLETED": "已完成",
+    "CANCELLED": "已取消",
+    "REJECTED": "已拒绝",
+    "EXPIRED": "已过期"
+}
+
+def translate_listing_type(t):
+    """翻译挂单类型为中文显示"""
+    return LISTING_TYPE_MAP.get(t, t)
+
+def translate_status(s):
+    """翻译状态为中文显示"""
+    return STATUS_MAP.get(s, s)
 
 # --- 主应用视图 (登录后) ---
 def show_main_app():
@@ -662,8 +684,11 @@ def show_main_app():
                 else:
                     for item in my_listings:
                         with st.container(border=True):
-                            st.write(f"**[{item['listing_type']}]** {item['description']}")
-                            st.caption(f"状态: **{item['status']}** | 价格/预算: {item['price']} FC")
+                            # --- MODIFIED LINE ---
+                            st.write(f"**[{translate_listing_type(item['listing_type'])}]** {item['description']}")
+                            # --- MODIFIED LINE ---
+                            st.caption(f"状态: **{translate_status(item['status'])}** | 价格/预算: {item['price']} FC")
+                            
                             if item['status'] == 'ACTIVE':
                                 if st.button("取消挂单", key=f"cancel_{item['listing_id']}"):
                                     msg_dict = {"owner_key": st.session_state.public_key, "listing_id": item['listing_id'], "timestamp": time.time()}
@@ -773,10 +798,11 @@ def show_main_app():
                         with st.expander("挂单出售 / 拍卖"):
                             with st.form(key=f"sell_form_{nft['nft_id']}"):
                                 st.write("将这个 NFT 发布到市场")
+                                # --- MODIFIED BLOCK ---
                                 listing_type_display = st.selectbox(
                                     "挂单类型",
                                     ["SALE", "AUCTION"],
-                                    format_func=lambda x: "一口价" if x == "SALE" else "拍卖",
+                                    format_func=translate_listing_type, # 使用翻译函数
                                     key=f"sell_type_{nft['nft_id']}"
                                 )
 
@@ -824,7 +850,7 @@ def show_main_app():
                                                 st.success(res.get('detail'))
                                                 st.cache_data.clear()
                                                 st.rerun()
-                            
+                                
     # --- 5. 管理员视图 ---
     if is_admin:
         with tabs[4]:

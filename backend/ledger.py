@@ -6,14 +6,13 @@ import json
 import os
 from contextlib import contextmanager
 from shared.crypto_utils import verify_signature
-
+from backend.nft_logic import get_handler
 DATABASE_PATH = '/app/data/ledger.db'
 LEDGER_LOCK = threading.Lock()
 
 # --- 系统保留账户 ---
 GENESIS_ACCOUNT = "JFJ_GENESIS"
 BURN_ACCOUNT = "JFJ_BURN"
-# <<< 核心修改: 托管账户现在至关重要 >>>
 ESCROW_ACCOUNT = "JFJ_ESCROW" 
 
 DEFAULT_INVITATION_QUOTA = 3
@@ -140,13 +139,47 @@ def init_db():
         conn.commit()
         print("数据库初始化完成 (V3.0 Market)。")
 
+# <<< --- 核心重构：全新的、通用的NFT验证函数 --- >>>
+def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
+    """
+    (内部通用函数) 验证一个NFT是否可以被交易。
+    返回: (是否可交易, 错误信息, NFT数据字典)
+    """
+    cursor.execute("SELECT nft_id, owner_key, nft_type, data, status FROM nfts WHERE nft_id = ?", (nft_id,))
+    nft_row = cursor.fetchone()
+
+    if not nft_row:
+        return False, "NFT不存在", None
+    
+    nft = dict(nft_row)
+    nft['data'] = json.loads(nft['data']) # 提前解析data
+
+    if nft['status'] != 'ACTIVE':
+        return False, "NFT不是活跃状态", nft
+    
+    if nft['owner_key'] != expected_owner:
+        return False, "你不是该NFT的所有者", nft
+
+    # --- 动态调用插件的特定检查逻辑 ---
+    handler = get_handler(nft['nft_type'])
+    if not handler:
+        # 如果找不到处理器，为安全起见，禁止交易
+        return False, f"未找到类型为 {nft['nft_type']} 的处理器，交易被拒绝", nft
+
+    # 调用插件自己的 is_tradable 方法
+    is_ok, reason = handler.is_tradable(nft)
+    if not is_ok:
+        return False, reason, nft
+            
+    return True, "验证通过", nft
+
 # <<< NFT 架构升级: 新增 NFT 数据库核心函数 >>>
 
-def mint_nft(owner_key: str, nft_type: str, data: dict) -> (bool, str, str):
+def mint_nft(owner_key: str, nft_type: str, data: dict, conn=None) -> (bool, str, str):
     """(底层) 将一个新的 NFT 记录到数据库中。"""
-    with LEDGER_LOCK, get_db_connection() as conn:
+    def run_logic(connection):
         try:
-            cursor = conn.cursor()
+            cursor = connection.cursor()
             nft_id = str(uuid.uuid4())
             data_json = json.dumps(data, ensure_ascii=False)
 
@@ -158,17 +191,26 @@ def mint_nft(owner_key: str, nft_type: str, data: dict) -> (bool, str, str):
                 "INSERT INTO nfts (nft_id, owner_key, nft_type, data, status) VALUES (?, ?, ?, ?, 'ACTIVE')",
                 (nft_id, owner_key, nft_type, data_json)
             )
-            conn.commit()
             return True, "NFT 铸造成功", nft_id
         except Exception as e:
-            conn.rollback()
             return False, f"NFT 铸造时数据库出错: {e}", None
+
+    if conn:
+        return run_logic(conn)
+    else:
+        with LEDGER_LOCK, get_db_connection() as new_conn:
+            success, detail, nft_id = run_logic(new_conn)
+            if success:
+                new_conn.commit()
+            else:
+                new_conn.rollback()
+            return success, detail, nft_id
+
 
 def get_nft_by_id(nft_id: str) -> dict:
     """根据 ID 获取单个 NFT 的详细信息。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # <<< 核心修复 1: 将 created_at 转换为 Unix 时间戳 (float) >>>
         query = """
             SELECT nft_id, owner_key, nft_type, data, status, 
                    CAST(strftime('%s', created_at) AS REAL) as created_at
@@ -187,7 +229,6 @@ def get_nfts_by_owner(owner_key: str) -> list:
     """获取指定所有者的所有 NFT。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # <<< 核心修复 2: 将 created_at 转换为 Unix 时间戳 (float) >>>
         query = """
             SELECT nft_id, owner_key, nft_type, data, status, 
                    CAST(strftime('%s', created_at) AS REAL) as created_at
@@ -235,8 +276,6 @@ def _change_nft_owner(nft_id: str, new_owner_key: str, conn) -> (bool, str):
         return False, f"转移NFT所有权失败: 未找到NFT {nft_id}"
     return True, "NFT所有权转移成功"
 
-
-# <<< 新增功能: 市场核心逻辑 >>>
 def create_market_listing(lister_key: str, listing_type: str, nft_id: str, nft_type: str, description: str, price: float, auction_hours: float = None) -> (bool, str):
     """在市场上创建一个新的挂单（销售、拍卖或求购）。"""
     with LEDGER_LOCK, get_db_connection() as conn:
@@ -245,21 +284,18 @@ def create_market_listing(lister_key: str, listing_type: str, nft_id: str, nft_t
             listing_id = str(uuid.uuid4())
             
             if listing_type in ['SALE', 'AUCTION']:
-                # --- 挂卖或拍卖逻辑 ---
                 if not nft_id: return False, "挂卖或拍卖必须提供nft_id"
-                # 1. 验证NFT所有权
-                cursor.execute("SELECT owner_key FROM nfts WHERE nft_id = ? AND status = 'ACTIVE'", (nft_id,))
-                nft = cursor.fetchone()
-                if not nft: return False, "NFT不存在或非活跃状态"
-                if nft['owner_key'] != lister_key: return False, "你不是该NFT的所有者"
                 
-                # 2. 托管NFT
+                # <<< 核心重构：使用新的通用验证函数 >>>
+                is_tradable, reason, _ = _validate_nft_for_trade(cursor, nft_id, lister_key)
+                if not is_tradable:
+                    return False, reason
+                
                 success, detail = _change_nft_owner(nft_id, ESCROW_ACCOUNT, conn)
                 if not success:
                     conn.rollback()
                     return False, detail
 
-                # 3. 写入挂单记录
                 end_time = time.time() + auction_hours * 3600 if listing_type == 'AUCTION' else None
                 cursor.execute(
                     """
@@ -270,15 +306,12 @@ def create_market_listing(lister_key: str, listing_type: str, nft_id: str, nft_t
                 )
 
             elif listing_type == 'SEEK':
-                # --- 求购逻辑 ---
                 if price <= 0: return False, "求购预算必须大于0"
-                # 1. 托管资金
                 success, detail = _create_system_transaction(lister_key, ESCROW_ACCOUNT, price, f"托管求购资金: {description[:20]}", conn)
                 if not success:
                     conn.rollback()
                     return False, f"托管求购资金失败: {detail}"
                 
-                # 2. 写入挂单记录
                 cursor.execute(
                     """
                     INSERT INTO market_listings (listing_id, lister_key, listing_type, nft_type, description, price, status)
@@ -313,7 +346,6 @@ def cancel_market_listing(lister_key: str, listing_id: str) -> (bool, str):
 
             elif listing['listing_type'] == 'SEEK':
                 # --- 取消求购: 退还资金 ---
-                # 检查是否有人已接受报价，如果有则不能取消 (虽然当前逻辑下不会发生)
                 cursor.execute("SELECT 1 FROM market_offers WHERE listing_id = ? AND status = 'ACCEPTED'", (listing_id,))
                 if cursor.fetchone():
                     return False, "已有报价被接受，无法取消此求购"
@@ -375,29 +407,25 @@ def place_auction_bid(bidder_key: str, listing_id: str, bid_amount: float) -> (b
             if listing['lister_key'] == bidder_key: return False, "不能对自己的商品出价"
             if time.time() > listing['end_time']: return False, "拍卖已结束"
             
-            price = listing['price'] # 起拍价
+            price = listing['price']
             highest_bid = listing['highest_bid']
             
             if bid_amount <= highest_bid: return False, f"出价必须高于当前最高价 {highest_bid}"
             if bid_amount < price and highest_bid == 0: return False, f"首次出价必须不低于起拍价 {price}"
 
-            # 检查余额
             if get_balance(bidder_key) < bid_amount: return False, "你的余额不足以支撑此出价"
 
-            # 退还上一个最高出价者的资金
             if listing['highest_bidder']:
                 success, detail = _create_system_transaction(ESCROW_ACCOUNT, listing['highest_bidder'], listing['highest_bid'], f"拍卖出价被超过，退款", conn)
                 if not success:
                     conn.rollback()
                     return False, f"退还上一位出价者资金失败: {detail}"
             
-            # 托管新出价者的资金
             success, detail = _create_system_transaction(bidder_key, ESCROW_ACCOUNT, bid_amount, f"托管拍卖出价", conn)
             if not success:
                 conn.rollback()
                 return False, f"托管您的出价资金失败: {detail}"
             
-            # 更新拍卖状态
             cursor.execute(
                 "UPDATE market_listings SET highest_bid = ?, highest_bidder = ? WHERE listing_id = ?",
                 (bid_amount, bidder_key, listing_id)
@@ -419,29 +447,22 @@ def resolve_finished_auctions():
         for auction in auctions_to_resolve:
             listing_id = auction['listing_id']
             if auction['highest_bidder']:
-                # --- 有人中标 ---
                 seller_key = auction['lister_key']
                 winner_key = auction['highest_bidder']
                 nft_id = auction['nft_id']
                 final_price = auction['highest_bid']
 
-                # 1. 托管资金 -> 卖家
                 success, detail = _create_system_transaction(ESCROW_ACCOUNT, seller_key, final_price, f"拍卖成功收款", conn)
                 if not success: continue
                 
-                # 2. 托管NFT -> 赢家
                 success, detail = _change_nft_owner(nft_id, winner_key, conn)
                 if not success: continue
                 
-                # 3. 更新状态
                 cursor.execute("UPDATE market_listings SET status = 'SOLD' WHERE listing_id = ?", (listing_id,))
             else:
-                # --- 流拍 ---
-                # 1. 托管NFT -> 原物主
                 success, detail = _change_nft_owner(auction['nft_id'], auction['lister_key'], conn)
                 if not success: continue
 
-                # 2. 更新状态
                 cursor.execute("UPDATE market_listings SET status = 'EXPIRED' WHERE listing_id = ?", (listing_id,))
             
             resolved_count += 1
@@ -453,24 +474,22 @@ def make_seek_offer(offerer_key: str, listing_id: str, offered_nft_id: str) -> (
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
-            # 1. 验证求购单存在且有效
             cursor.execute("SELECT * FROM market_listings WHERE listing_id = ? AND listing_type = 'SEEK' AND status = 'ACTIVE'", (listing_id,))
             listing = cursor.fetchone()
             if not listing: return False, "求购信息不存在或已结束"
             if listing['lister_key'] == offerer_key: return False, "不能向自己的求购单报价"
 
-            # 2. 验证NFT所有权和类型
-            cursor.execute("SELECT owner_key, nft_type FROM nfts WHERE nft_id = ? AND status = 'ACTIVE'", (offered_nft_id,))
-            nft = cursor.fetchone()
-            if not nft: return False, "您提供的NFT不存在"
-            if nft['owner_key'] != offerer_key: return False, "您不是该NFT的所有者"
-            if nft['nft_type'] != listing['nft_type']: return False, f"求购的NFT类型为 {listing['nft_type']}, 您提供的是 {nft['nft_type']}"
+            # <<< 核心重构：使用新的通用验证函数 >>>
+            is_tradable, reason, nft_details = _validate_nft_for_trade(cursor, offered_nft_id, offerer_key)
+            if not is_tradable:
+                return False, reason
+            
+            if nft_details['nft_type'] != listing['nft_type']: 
+                return False, f"求购的NFT类型为 {listing['nft_type']}, 您提供的是 {nft_details['nft_type']}"
 
-            # 3. 检查是否已报过价
             cursor.execute("SELECT 1 FROM market_offers WHERE listing_id = ? AND offered_nft_id = ?", (listing_id, offered_nft_id))
             if cursor.fetchone(): return False, "您已经用这个NFT报过价了"
 
-            # 4. 写入报价记录
             offer_id = str(uuid.uuid4())
             cursor.execute(
                 "INSERT INTO market_offers (offer_id, listing_id, offerer_key, offered_nft_id, status) VALUES (?, ?, ?, ?, 'PENDING')",
@@ -487,7 +506,6 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
-            # 1. 联合查询验证所有权和状态
             query = """
                 SELECT o.*, l.lister_key, l.price, l.status as listing_status
                 FROM market_offers o JOIN market_listings l ON o.listing_id = l.listing_id
@@ -501,34 +519,28 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             if offer_details['listing_status'] != 'ACTIVE': return False, "该求购已结束"
 
             if not accept:
-                # --- 拒绝报价 ---
                 cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE offer_id = ?", (offer_id,))
                 conn.commit()
                 return True, "已拒绝该报价"
 
-            # --- 接受报价 ---
             offerer_key = offer_details['offerer_key']
             offered_nft_id = offer_details['offered_nft_id']
             price = offer_details['price']
             listing_id = offer_details['listing_id']
             
-            # 1. 托管资金 -> 报价人
             success, detail = _create_system_transaction(ESCROW_ACCOUNT, offerer_key, price, f"完成求购交易", conn)
             if not success:
                 conn.rollback()
                 return False, f"支付报价人失败: {detail}"
 
-            # 2. 报价NFT -> 求购人 (注意，此时NFT还在报价人名下，直接转移)
             success, detail = _change_nft_owner(offered_nft_id, seeker_key, conn)
             if not success:
                 conn.rollback()
                 return False, f"转移NFT失败: {detail}"
 
-            # 3. 更新报价状态和挂单状态
             cursor.execute("UPDATE market_offers SET status = 'ACCEPTED' WHERE offer_id = ?", (offer_id,))
             cursor.execute("UPDATE market_listings SET status = 'FULFILLED' WHERE listing_id = ?", (listing_id,))
             
-            # 4. 拒绝该求购单下的其他所有报价
             cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE listing_id = ? AND status = 'PENDING'", (listing_id,))
             
             conn.commit()
@@ -537,10 +549,9 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             conn.rollback()
             return False, f"处理报价失败: {e}"
         
-# --- 数据查询 ---
 def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
     """获取市场上的所有挂单。"""
-    resolve_finished_auctions() # 每次查询时顺便结算一下拍卖
+    resolve_finished_auctions()
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = """
@@ -597,10 +608,8 @@ def get_my_market_activity(public_key: str) -> dict:
     """获取我所有的市场活动（挂单和报价）。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # 我的挂单
         cursor.execute("SELECT * FROM market_listings WHERE lister_key = ? ORDER BY created_at DESC", (public_key,))
         my_listings = [dict(row) for row in cursor.fetchall()]
-        # 我的报价
         cursor.execute("SELECT * FROM market_offers WHERE offerer_key = ? ORDER BY created_at DESC", (public_key,))
         my_offers = [dict(row) for row in cursor.fetchall()]
         return {"listings": my_listings, "offers": my_offers}
@@ -647,7 +656,7 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
             if not code_data:
                 return False, "无效的邀请码或邀请码已被使用"
             
-            if (time.time() - code_data['created_at_unix']) > 86400 * 7: # 7天有效期
+            if (time.time() - code_data['created_at_unix']) > 86400 * 7:
                 return False, "邀请码已过期"
                 
             inviter_key = code_data['generated_by']
@@ -676,8 +685,6 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
         except Exception as e:
             conn.rollback()
             return False, f"注册时发生未知错误: {e}"
-
-# --- 用户查询 ---
 
 def get_balance(public_key: str) -> float:
     """查询指定公钥的余额。"""
@@ -767,8 +774,6 @@ def get_transaction_history(public_key: str) -> list:
             
         return results
 
-# --- 核心交易逻辑 ---
-
 def process_transaction(
     from_key: str, to_key: str, amount: float, 
     message_json: str, signature: str, note: str = None
@@ -813,8 +818,6 @@ def process_transaction(
             conn.rollback()
             return False, f"交易失败: {e}"
 
-# --- 管理员与系统功能 ---
-
 def get_all_balances(include_inactive=False) -> list:
     """(管理员功能) 获取所有用户的余额和邀请信息。"""
     with get_db_connection() as conn:
@@ -848,7 +851,6 @@ def _execute_system_tx_logic(from_key, to_key, amount, note, conn):
     """(内部函数) 执行系统交易的核心逻辑，被 _create_system_transaction 调用。"""
     cursor = conn.cursor()
     try:
-        # 更新付款方 (如果不是铸币)
         if from_key != GENESIS_ACCOUNT:
             cursor.execute("SELECT balance FROM balances WHERE public_key = ?", (from_key,))
             from_balance_row = cursor.fetchone()
@@ -858,7 +860,6 @@ def _execute_system_tx_logic(from_key, to_key, amount, note, conn):
             new_from_balance = current_from_balance - amount
             cursor.execute("UPDATE balances SET balance = ? WHERE public_key = ?", (new_from_balance, from_key))
 
-        # 更新收款方 (如果不是销毁)
         if to_key != BURN_ACCOUNT:
             cursor.execute("SELECT balance FROM balances WHERE public_key = ?", (to_key,))
             to_balance_row = cursor.fetchone()
@@ -866,7 +867,6 @@ def _execute_system_tx_logic(from_key, to_key, amount, note, conn):
             new_to_balance = current_to_balance + amount
             cursor.execute("INSERT OR REPLACE INTO balances (public_key, balance) VALUES (?, ?)", (to_key, new_to_balance))
 
-        # 记录交易
         tx_id = str(uuid.uuid4())
         timestamp = time.time()
         message = {"from": from_key, "to": to_key, "amount": amount, "timestamp": timestamp, "note": note}
@@ -906,33 +906,19 @@ def admin_burn_coins(from_key: str, amount: float, note: str = None) -> (bool, s
     if amount <= 0: return False, "销毁金额必须大于0"
     return _create_system_transaction(from_key, BURN_ACCOUNT, amount, note or "管理员减持")
 
-def admin_delete_user(public_key: str) -> (bool, str):
-    """(管理员功能) 禁用一个用户并清零其资产。"""
+def admin_set_user_active_status(public_key: str, is_active: bool) -> (bool, str):
+    """(管理员功能) 启用或禁用一个用户。"""
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT balance FROM balances WHERE public_key = ?", (public_key,))
-            balance_row = cursor.fetchone()
-            if not balance_row: return False, "用户不存在"
-            
-            current_balance = balance_row['balance']
-            
-            cursor.execute("UPDATE users SET is_active = 0, invitation_quota = 0 WHERE public_key = ?", (public_key,))
-            
-            if current_balance > 0:
-                success, detail = _create_system_transaction(
-                    from_key=public_key, to_key=BURN_ACCOUNT, amount=current_balance,
-                    note=f"禁用用户 {public_key[:10]}... 并清零资产", conn=conn
-                )
-                if not success:
-                    conn.rollback()
-                    return False, f"禁用用户时清零资产失败: {detail}"
-
+            cursor.execute("UPDATE users SET is_active = ? WHERE public_key = ?", (int(is_active), public_key))
+            if cursor.rowcount == 0: return False, "未找到用户"
             conn.commit()
-            return True, f"用户 {public_key[:10]}... 已被禁用"
+            status_text = "启用" if is_active else "禁用"
+            return True, f"成功{status_text}用户 {public_key[:10]}..."
         except Exception as e:
             conn.rollback()
-            return False, f"禁用用户失败: {e}"
+            return False, f"更新用户状态失败: {e}"
 
 def admin_purge_user(public_key: str) -> (bool, str):
     """(管理员功能) 彻底清除一个用户的数据以释放用户名。"""
@@ -956,30 +942,19 @@ def admin_purge_user(public_key: str) -> (bool, str):
                     conn.rollback()
                     return False, f"清除用户时清零资产失败: {detail}"
 
-            # <<< 核心修改: 清理市场相关数据 >>>
-            # 1. 取消该用户所有ACTIVE的挂单 (这会自动退还托管的NFT或资金)
             cursor.execute("SELECT listing_id FROM market_listings WHERE lister_key = ? and status = 'ACTIVE'", (public_key,))
             user_listings = cursor.fetchall()
             for listing in user_listings:
-                # 调用取消函数来处理复杂的退还逻辑
-                # 注意：这里在一个事务中调用了另一个会创建新连接和事务的函数，
-                # 在高并发下可能导致死锁。但在管理员手动操作的低频场景下是可接受的。
-                # 理想的重构是让 cancel_market_listing 也能接受一个 conn 对象。
-                # 为保持接口简单，这里暂时接受此设计。
                 _success, _detail = cancel_market_listing(public_key, listing['listing_id'])
                 if not _success:
                     print(f"Warning: Purging user, failed to cancel listing {listing['listing_id']}: {_detail}")
 
-            # 2. 拒绝该用户收到的所有PENDING的报价
             cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE listing_id IN (SELECT listing_id FROM market_listings WHERE lister_key = ?) AND status = 'PENDING'", (public_key,))
 
-            # 3. 删除该用户发起的所有报价
             cursor.execute("DELETE FROM market_offers WHERE offerer_key = ?", (public_key,))
 
-            # 4. 烧毁该用户的所有 NFT
             cursor.execute("UPDATE nfts SET status = 'BURNED' WHERE owner_key = ?", (public_key,))
 
-            # 5. 从所有相关表中删除
             cursor.execute("DELETE FROM invitation_codes WHERE generated_by = ? OR used_by = ?", (public_key, public_key))
             cursor.execute("DELETE FROM balances WHERE public_key = ?", (public_key,))
             cursor.execute("DELETE FROM users WHERE public_key = ?", (public_key,))
@@ -1016,8 +991,6 @@ def nuke_database() -> (bool, str):
             return True, "数据库已重置并重建。"
         except Exception as e:
             return False, f"重置数据库失败: {e}"
-
-# --- 邀请码功能 ---
 
 def generate_invitation_code(generator_key: str) -> (bool, str):
     """消耗1个邀请额度，生成一个新的一次性邀请码。"""
@@ -1076,7 +1049,7 @@ def create_genesis_user(username: str, public_key: str, private_key: str) -> (bo
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
-            inv_quota = 999999 # 无限邀请
+            inv_quota = 999999
 
             cursor.execute(
                 "INSERT INTO users (public_key, username, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?)",
