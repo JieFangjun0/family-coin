@@ -610,8 +610,45 @@ def show_main_app():
                                                 st.success(res.get('detail')); st.cache_data.clear(); st.rerun()
 
         # --- 我的交易活动 ---
-        with my_activity_tab:
-            st.subheader("我的交易看板")
+        with st.container(border=True):
+            st.subheader("发布求购")
+            st.info("发布一个求购信息，让拥有你所需 NFT 的人来找你。发布时将暂时托管你的预算资金。")
+            
+            all_nft_types, err = api_call_cached('GET', '/nfts/types')
+            if err or not all_nft_types:
+                # 如果API调用失败，提供一个后备选项
+                all_nft_types = ["SECRET_WISH"] 
+
+            with st.form(key="seek_form"):
+                seek_nft_type = st.selectbox("求购的 NFT 类型", options=all_nft_types)
+                seek_description = st.text_input("求购描述", placeholder="例如：求一个金色的宠物")
+                seek_price = st.number_input("我的预算 (FC)", min_value=0.01, step=1.0, format="%.2f")
+
+                if st.form_submit_button("发布求购信息", type="primary"):
+                    if not seek_description:
+                        st.error("求购描述不能为空")
+                    else:
+                        with st.spinner("正在发布求购..."):
+                            msg_dict = {
+                                "owner_key": st.session_state.public_key,
+                                "listing_type": "SEEK",
+                                "nft_id": None,
+                                "nft_type": seek_nft_type,
+                                "description": seek_description,
+                                "price": seek_price,
+                                "auction_hours": None,
+                                "timestamp": time.time()
+                            }
+                            payload = create_signed_message(msg_dict)
+                            if payload:
+                                res, err = api_call('POST', '/market/create_listing', payload=payload)
+                                if err:
+                                    st.error(f"发布求购失败: {err}")
+                                else:
+                                    st.success(res.get('detail'))
+                                    st.cache_data.clear()
+                                    st.rerun()
+            st.divider()
             activity, err = api_call_cached('GET', '/market/my_activity', params={'public_key': st.session_state.public_key})
             if err or not activity:
                 st.error("无法加载您的交易活动")
@@ -730,6 +767,61 @@ def show_main_app():
                         api_call, 
                         lambda msg: create_signed_message(msg)
                     )
+                    if nft.get('status') == 'ACTIVE':
+                        with st.expander("挂单出售 / 拍卖"):
+                            with st.form(key=f"sell_form_{nft['nft_id']}"):
+                                st.write("将这个 NFT 发布到市场")
+                                listing_type_display = st.selectbox(
+                                    "挂单类型",
+                                    ["SALE", "AUCTION"],
+                                    format_func=lambda x: "一口价" if x == "SALE" else "拍卖",
+                                    key=f"sell_type_{nft['nft_id']}"
+                                )
+
+                                description = st.text_input(
+                                    "挂单描述",
+                                    value=nft.get('data', {}).get('name', f"一个 {nft['nft_type']} NFT"),
+                                    key=f"sell_desc_{nft['nft_id']}"
+                                )
+                                price = st.number_input(
+                                    "价格 / 起拍价 (FC)",
+                                    min_value=0.01,
+                                    step=1.0,
+                                    format="%.2f",
+                                    key=f"sell_price_{nft['nft_id']}"
+                                )
+                                
+                                auction_hours = None
+                                if listing_type_display == 'AUCTION':
+                                    auction_hours = st.number_input(
+                                        "拍卖持续小时数",
+                                        min_value=0.1,
+                                        value=24.0,
+                                        step=0.5,
+                                        key=f"sell_hours_{nft['nft_id']}"
+                                    )
+
+                                if st.form_submit_button("确认挂单"):
+                                    with st.spinner("正在创建挂单..."):
+                                        msg_dict = {
+                                            "owner_key": st.session_state.public_key,
+                                            "listing_type": listing_type_display,
+                                            "nft_id": nft['nft_id'],
+                                            "nft_type": nft['nft_type'],
+                                            "description": description,
+                                            "price": price,
+                                            "auction_hours": auction_hours,
+                                            "timestamp": time.time()
+                                        }
+                                        payload = create_signed_message(msg_dict)
+                                        if payload:
+                                            res, err = api_call('POST', '/market/create_listing', payload=payload)
+                                            if err:
+                                                st.error(f"挂单失败: {err}")
+                                            else:
+                                                st.success(res.get('detail'))
+                                                st.cache_data.clear()
+                                                st.rerun()
                             
     # --- 5. 管理员视图 ---
     if is_admin:
