@@ -1,0 +1,22 @@
+# 数据库文件 (绝不能提交！)
+data/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境文件夹 (如果你在本地使用了 venv)
+.venv/
+venv/
+env/
+
+# IDE 配置文件
+.idea/
+.vscode/
+
+# Docker build cache
+.dockerignore
+
+# 敏感信息文件 (我们稍后会创建)
+.env

@@ -1,0 +1,46 @@
+services:
+  # 1. 后端服务 (FastAPI)
+  backend:
+    build: .
+    container_name: familycoin-backend
+    # (1) 添加 --reload 标志，使其在代码更改时自动重启
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./data:/app/data
+      # (2) 添加代码卷挂载：将本地代码目录映射到容器的工作目录
+      # 这样 uvicorn 才能检测到变化
+      - ./backend:/app/backend
+      - ./shared:/app/shared
+    networks:
+      - familycoin-net
+
+  # 2. 前端服务 (Streamlit)
+  frontend:
+    build: .
+    container_name: familycoin-frontend
+    command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      # 这里是修复：ports 必须是一个列表
+      - "8501:8501"
+    volumes:
+      # (3) 添加代码卷挂载：Streamlit 会自动检测挂载目录中的文件变化
+      - ./frontend:/app/frontend
+      - ./shared:/app/shared
+    environment:
+      # 告诉前端 API 在哪里
+      - BACKEND_URL=http://backend:8000
+      
+      # 将 /app 目录（项目根目录）添加到 Python 的模块搜索路径
+      # 这允许 import shared 和 backend
+      - PYTHONPATH=/app
+      
+    depends_on:
+      - backend
+    networks:
+      - familycoin-net
+
+networks:
+  familycoin-net:
+    driver: bridge
+
+

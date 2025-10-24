@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+streamlit
+requests
+cryptography
+qrcode[pil]
+pandas
+pydantic
+pytz
