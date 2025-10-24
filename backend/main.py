@@ -423,6 +423,25 @@ def api_perform_nft_action(request: NFTActionRequest):
 @app.get("/market/listings", tags=["Market"])
 def api_get_market_listings(listing_type: str, exclude_owner: Optional[str] = None):
     items = ledger.get_market_listings(listing_type=listing_type, exclude_owner=exclude_owner)
+    
+    # <<< 核心修改：为每个挂单添加动态描述 >>>
+    for item in items:
+        # 只有挂售和拍卖的才有具体的 nft_data
+        if item.get('nft_data'):
+            nft_type = item.get('nft_type')
+            handler = get_handler(nft_type)
+            if handler:
+                # 构造一个临时的 nft 对象以调用方法
+                temp_nft_for_desc = {
+                    "data": item['nft_data'],
+                    "nft_type": nft_type
+                }
+                item['trade_description'] = handler.get_trade_description(temp_nft_for_desc)
+            else:
+                item['trade_description'] = item['description'] # Fallback
+        else:
+            item['trade_description'] = item['description'] # 求购单直接使用自身描述
+
     return {"listings": items}
 
 @app.get("/market/my_activity", tags=["Market"])
@@ -433,8 +452,24 @@ def api_get_my_activity(public_key: str):
 @app.get("/market/offers", tags=["Market"])
 def api_get_offers(listing_id: str):
     offers = ledger.get_offers_for_listing(listing_id)
+    for offer in offers:
+        if offer.get('nft_data'):
+            nft_type = offer.get('nft_type')
+            handler = get_handler(nft_type)
+            if handler:
+                # 构造一个临时的 nft 对象以调用方法
+                temp_nft_for_desc = {
+                    "data": offer['nft_data'],
+                    "nft_type": nft_type
+                }
+                offer['trade_description'] = handler.get_trade_description(temp_nft_for_desc)
+            else:
+                # Fallback to the name in data or the ID
+                offer['trade_description'] = offer['nft_data'].get('name', offer['offered_nft_id'][:8])
+        else:
+            offer['trade_description'] = "未知NFT"
+            
     return {"offers": offers}
-
 @app.post("/market/create_listing", response_model=SuccessResponse, tags=["Market"])
 def api_create_listing(request: MarketSignedRequest):
     message = get_verified_message(request, MarketListingRequest)

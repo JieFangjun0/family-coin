@@ -557,8 +557,8 @@ def show_main_app():
                 else:
                     for item in sales['listings']:
                         with st.container(border=True):
-                            nft_data = item.get('nft_data', {})
-                            st.write(f"**{nft_data.get('name', item['description'])}**")
+                            # <<< 使用新的 trade_description 字段 >>>
+                            st.write(f"**{item.get('trade_description', item['description'])}**")
                             st.caption(f"类型: `{item['nft_type']}` | 卖家: {item['lister_username']}")
                             st.success(f"价格: **{item['price']} FC**")
                             if st.button("立即购买", key=f"buy_{item['listing_id']}", type="primary"):
@@ -580,8 +580,8 @@ def show_main_app():
                 else:
                     for item in auctions['listings']:
                         with st.container(border=True):
-                            nft_data = item.get('nft_data', {})
-                            st.write(f"**{nft_data.get('name', item['description'])}**")
+                            # <<< 使用新的 trade_description 字段 >>>
+                            st.write(f"**{item.get('trade_description', item['description'])}**")
                             st.caption(f"卖家: {item['lister_username']}")
                             end_time_str = datetime.fromtimestamp(item['end_time'], TIMEZONE).strftime('%H:%M:%S')
                             st.warning(f"今日 {end_time_str} 截止")
@@ -709,7 +709,8 @@ def show_main_app():
                                     for offer in offers:
                                         if offer['status'] == 'PENDING':
                                             offer_col1, offer_col2, offer_col3 = st.columns([3,1,1])
-                                            offer_col1.info(f"来自 {offer['offerer_username']} 的报价: {offer['nft_data'].get('name', offer['offered_nft_id'][:8])}")
+                                            offer_description = offer.get('trade_description', offer['offered_nft_id'][:8])
+                                            offer_col1.info(f"来自 {offer['offerer_username']} 的报价: {offer_description}")
                                             if offer_col2.button("接受", key=f"accept_{offer['offer_id']}", type="primary"):
                                                 msg_dict = {"owner_key": st.session_state.public_key, "offer_id": offer['offer_id'], "accept": True, "timestamp": time.time()}
                                                 payload = create_signed_message(msg_dict)

@@ -74,3 +74,21 @@ class NFTLogicHandler(ABC):
         # 默认情况下，所有NFT都是可交易的。
         # 只有像“秘密愿望”这样有时间限制的NFT才需要重写此方法。
         return True, "OK"
+    
+    # <<< 新增功能：交易描述函数 >>>
+    def get_trade_description(self, nft: dict) -> str:
+        """
+        (可选实现) 获取该NFT在市场中展示的动态描述。
+        这个描述可以基于NFT的内部数据动态生成。
+        :param nft: 从数据库中获取的完整 NFT 对象。
+        :return: 一个用于市场展示的字符串。
+        """
+        # 默认实现：返回 data 字典中的 'name' 或 'description'
+        # 这为老插件提供了向后兼容性
+        data = nft.get('data', {})
+        ret_str = 'NTF'
+        if 'name' in data:
+            ret_str+= "名称："+str(data['name'])+';'
+        if 'description' in data:
+            ret_str+= '描述：'+str(data['description'])+';'
+        return ret_str

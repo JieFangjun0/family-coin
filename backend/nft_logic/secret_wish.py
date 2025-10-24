@@ -3,7 +3,7 @@
 import time
 import uuid
 from .base import NFTLogicHandler
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class SecretWishHandler(NFTLogicHandler):
     """
@@ -120,3 +120,29 @@ class SecretWishHandler(NFTLogicHandler):
             return False, "NFT数据异常，无法交易"
         
         return True, "OK"
+    
+    def get_trade_description(self, nft: dict) -> str:
+        """
+        为“秘密愿望”生成一个动态的、吸引人的市场描述。
+        """
+        try:
+            data = nft.get('data', {})
+            description = data.get('description', '一个秘密')
+            destroy_ts = data.get('destroy_timestamp', 0)
+            
+            time_left_seconds = max(0, int(destroy_ts - time.time()))
+            time_left = timedelta(seconds=time_left_seconds)
+            
+            days = time_left.days
+            hours, remainder = divmod(time_left.seconds, 3600)
+            
+            if days > 0:
+                countdown_str = f"约 {days} 天 {hours} 小时"
+            else:
+                minutes, _ = divmod(remainder, 60)
+                countdown_str = f"约 {hours} 小时 {minutes} 分钟"
+            
+            return f"“{description}” - 这个秘密还剩下 {countdown_str} 就会消失。"
+        except Exception as e:
+            # 如果出现任何错误，返回一个安全的默认值
+            return data.get('description', "一个神秘的愿望")
