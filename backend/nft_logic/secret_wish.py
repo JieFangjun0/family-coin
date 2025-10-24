@@ -62,3 +62,39 @@ class SecretWishHandler(NFTLogicHandler):
         执行操作的逻辑。由于不支持任何操作，直接返回失败。
         """
         return False, "内部错误：不应执行任何操作", {}
+    
+    # <<< 新增功能: 实现商店配置接口 >>>
+    @classmethod
+    def get_shop_config(cls) -> dict:
+        return {
+            "creatable": True,
+            "cost": 5.0,  # 创建一个“秘密愿望”需要花费 5 FC
+            "name": "秘密愿望",
+            "description": "支付 5 FC 来封存一个秘密或愿望。它将完全属于你，直到在设定的时间后悄然消失。",
+            "fields": [
+                {
+                    "name": "description", 
+                    "label": "愿望的公开描述", 
+                    "type": "text_input", 
+                    "required": True,
+                    "help": "这段话所有人都能在商店看到，例如 '一个关于未来的小小预测'"
+                },
+                {
+                    "name": "content", 
+                    "label": "愿望的秘密内容", 
+                    "type": "text_area", 
+                    "required": True,
+                    "help": "这段话只有你和未来的自己能看到"
+                },
+                {
+                    "name": "destroy_in_days", 
+                    "label": "多少天后消失 (0.001 - 365)", 
+                    "type": "number_input", 
+                    "required": True, 
+                    "default": 7.0,
+                    "min_value": 0.001, # 约1.5分钟
+                    "max_value": 365.0,
+                    "step": 0.5
+                }
+            ]
+        }

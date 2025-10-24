@@ -15,7 +15,7 @@ from shared.crypto_utils import (
 )
 from datetime import datetime
 import pytz
-# <<< NFT前端插件: 导入统一的渲染路由函数 >>>
+# 导入统一的渲染路由函数
 from frontend.nft_renderers import render_nft, get_mint_info_for_type
 
 # --- 配置 ---
@@ -121,7 +121,6 @@ def st_copy_to_clipboard_button(text_to_copy, button_text, key):
 # --- API 辅助函数 ---
 @st.cache_data(ttl=60)
 def api_call_cached(method, endpoint, payload=None, headers=None, params=None):
-    # 对于缓存的调用，我们直接转发给非缓存版本
     return api_call(method, endpoint, payload, headers, params)
 
 def api_call(method, endpoint, payload=None, headers=None, params=None):
@@ -129,7 +128,6 @@ def api_call(method, endpoint, payload=None, headers=None, params=None):
     url = f"{BACKEND_URL}{endpoint}"
     try:
         if method == 'GET':
-            # <<< 修改: requests库会自动处理params的URL编码，非常健壮
             response = requests.get(url, headers=headers, params=params, timeout=10)
         elif method == 'POST':
             response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -243,7 +241,6 @@ def show_login_register():
                 if not public_key:
                     st.error("私钥格式无效。请输入 PKCS8 PEM 格式的私钥。")
                 else:
-                    # <<< 核心修改 6: 使用 params 字典传递公钥
                     data, error = api_call('GET', "/user/details/", params={"public_key": public_key})
                     if error:
                         st.error(f"登录失败: {error}")
@@ -278,7 +275,6 @@ def show_login_register():
                 st.session_state.username = data['username']
                 
                 with st.spinner("正在完成登录..."):
-                    # <<< 核心修改 7: 使用 params 字典传递公钥
                     details, details_error = api_call('GET', "/user/details/", params={"public_key": data['public_key']})
                     if details_error:
                         st.error(f"自动登录时获取详情失败: {details_error}")
@@ -290,7 +286,6 @@ def show_login_register():
                 st.session_state.new_user_info = None
                 st.rerun()
         else:
-            # ... (注册表单部分不变，省略)
             st.subheader("注册新账户")
             with st.form("register_form"):
                 username = st.text_input("输入你的用户名 (3-15个字符)", key="reg_username", max_chars=15)
@@ -321,7 +316,6 @@ def get_user_details(force_refresh=False):
     if not force_refresh and st.session_state.user_details:
         return st.session_state.user_details
             
-    # <<< 核心修改 8: 使用 params 字典传递公钥
     data, error = api_call('GET', "/user/details/", params={"public_key": st.session_state.public_key})
     if error:
         st.error(f"无法获取用户详情: {error}")
@@ -360,7 +354,6 @@ def show_main_app():
     if not details: # 如果获取失败，停止渲染
         return
 
-    # ... (欢迎语部分不变，省略)
     if details and details.get('tx_count', 0) == 0 and details.get('invited_by') != 'GENESIS':
         st.warning(
             "👋 **欢迎新朋友！** 你的账户已成功创建，但请务必再次确认你已经**安全备份了你的私钥**。"
@@ -384,7 +377,6 @@ def show_main_app():
             st.metric("剩余邀请次数", details.get('invitation_quota', 0))
 
             if st.button("生成新邀请码", type="primary"):
-                # ... (生成邀请码逻辑不变，省略)
                 if details.get('invitation_quota', 0) <= 0:
                     st.error("邀请额度不足！")
                 else:
@@ -403,7 +395,6 @@ def show_main_app():
                                 st.rerun()
 
             with st.expander("显示我未使用的邀请码"):
-                # <<< 核心修改 9: 使用 params 字典传递公钥
                 codes_data, error = api_call_cached('GET', "/user/my_invitations/", params={"public_key": st.session_state.public_key})
                 if error:
                     st.error(f"无法加载邀请码: {error}")
@@ -412,7 +403,7 @@ def show_main_app():
                 else:
                     codes_list = [c['code'] for c in codes_data['codes']]
                     st.text_area("可用的邀请码", "\n".join(codes_list), height=100, disabled=True)
-        # ... (侧边栏剩余部分不变，省略)
+
         st.subheader("我的公钥 (地址)")
         st.text_area("Public Key", st.session_state.public_key, height=150, disabled=True, key="sidebar_pubkey")
         
@@ -438,7 +429,6 @@ def show_main_app():
             
     # --- 主导航 ---
     is_admin = details and details.get('invited_by') == 'GENESIS'
-    # <<< NFT 架构升级: 在主导航中增加“我的收藏” >>>
     tabs_list = ["我的钱包", "转账", "🛒 商店", "🖼️ 我的收藏"]
     
     if is_admin:
@@ -451,7 +441,6 @@ def show_main_app():
         st.header("我的钱包")
         col1, col2, col3 = st.columns(3)
         
-        # <<< 核心修改 10: 使用 params 字典传递公钥
         balance_data, error = api_call_cached('GET', "/balance/", params={"public_key": st.session_state.public_key})
         balance = 0.0
         if error:
@@ -468,7 +457,6 @@ def show_main_app():
         st.divider()
         st.subheader("交易历史")
         
-        # <<< 核心修改 11: 使用 params 字典传递公钥
         history_data, error = api_call_cached('GET', "/history/", params={"public_key": st.session_state.public_key})
         if error:
             st.error(f"无法获取交易历史: {error}")
@@ -527,158 +515,199 @@ def show_main_app():
                                 st.cache_data.clear()
                                 st.session_state.user_details = None
 
-    # --- 3. 商店视图 ---
+    # <<< 核心修改: 重塑整个商店/市场UI >>>
+    # --- 3. 商店视图 (V3.0 NFT 市场) ---
     with tabs[2]:
-        st.header("🛒 商店")
-        shop_browse_tab, shop_post_tab, shop_my_items_tab = st.tabs(["浏览市场", "发布商品", "我的商品"])
+        st.header("🛒 NFT 市场")
         
-        with shop_browse_tab:
-            # ... (商店浏览部分不变，省略)
-            st.subheader("市场上的商品")
-            col_sale, col_wanted = st.columns(2)
-            with col_sale:
-                st.info("其他人正在出售 (点击购买)")
-                items_data, error = api_call_cached(
-                    'GET', '/shop/list', 
-                    params={'item_type': 'FOR_SALE', 'exclude_owner': st.session_state.public_key}
-                )
-                if error:
-                    st.error(f"无法加载待售商品: {error}")
-                elif not items_data or not items_data.get('items'):
-                    st.write("目前没有人在出售商品。")
+        market_tab, my_activity_tab, create_nft_tab = st.tabs(["浏览市场", "我的交易", "✨ 铸造新品"])
+
+        # --- 市场浏览 ---
+        with market_tab:
+            sale_col, auction_col, seek_col = st.columns(3)
+            
+            # --- 挂售区 ---
+            with sale_col:
+                st.subheader("一口价")
+                sales, err = api_call_cached('GET', '/market/listings', params={'listing_type': 'SALE', 'exclude_owner': st.session_state.public_key})
+                if err or not sales or not sales.get('listings'):
+                    st.caption("暂无待售NFT")
                 else:
-                    for item in items_data['items']:
-                        item_id = item['item_id']
+                    for item in sales['listings']:
                         with st.container(border=True):
-                            st.write(f"**{item['description']}**")
-                            st.write(f"价格: **{item['price']} FC** | 卖家: {item['username']}")
-                            if st.button(f"购买", key=f"buy_{item_id}", type="primary"):
-                                if balance < item['price']:
-                                    st.error("你的余额不足以购买此商品！")
+                            nft_data = item.get('nft_data', {})
+                            st.write(f"**{nft_data.get('name', item['description'])}**")
+                            st.caption(f"类型: `{item['nft_type']}` | 卖家: {item['lister_username']}")
+                            st.success(f"价格: **{item['price']} FC**")
+                            if st.button("立即购买", key=f"buy_{item['listing_id']}", type="primary"):
+                                msg_dict = {"owner_key": st.session_state.public_key, "listing_id": item['listing_id'], "timestamp": time.time()}
+                                payload = create_signed_message(msg_dict)
+                                if payload:
+                                    res, err = api_call('POST', '/market/buy', payload=payload)
+                                    if err: st.error(err)
+                                    else: 
+                                        st.success(res.get('detail')); st.balloons()
+                                        st.cache_data.clear(); st.rerun()
+
+            # --- 拍卖区 ---
+            with auction_col:
+                st.subheader("拍卖行")
+                auctions, err = api_call_cached('GET', '/market/listings', params={'listing_type': 'AUCTION', 'exclude_owner': st.session_state.public_key})
+                if err or not auctions or not auctions.get('listings'):
+                    st.caption("暂无拍卖品")
+                else:
+                    for item in auctions['listings']:
+                        with st.container(border=True):
+                            nft_data = item.get('nft_data', {})
+                            st.write(f"**{nft_data.get('name', item['description'])}**")
+                            st.caption(f"卖家: {item['lister_username']}")
+                            end_time_str = datetime.fromtimestamp(item['end_time'], TIMEZONE).strftime('%H:%M:%S')
+                            st.warning(f"今日 {end_time_str} 截止")
+                            
+                            price_label = "当前最高价" if item['highest_bid'] > 0 else "起拍价"
+                            st.metric(price_label, f"{item.get('highest_bid') or item.get('price')} FC")
+                            
+                            with st.form(key=f"bid_form_{item['listing_id']}"):
+                                bid_amount = st.number_input("你的出价", min_value=float(item['highest_bid'] or item['price']) + 0.01, step=1.0, format="%.2f")
+                                if st.form_submit_button("出价"):
+                                    msg_dict = {"owner_key": st.session_state.public_key, "listing_id": item['listing_id'], "amount": bid_amount, "timestamp": time.time()}
+                                    payload = create_signed_message(msg_dict)
+                                    if payload:
+                                        res, err = api_call('POST', '/market/place_bid', payload=payload)
+                                        if err: st.error(err)
+                                        else: 
+                                            st.success(res.get('detail'))
+                                            st.cache_data.clear(); st.rerun()
+
+            # --- 求购区 ---
+            with seek_col:
+                st.subheader("求购栏")
+                seeks, err = api_call_cached('GET', '/market/listings', params={'listing_type': 'SEEK', 'exclude_owner': st.session_state.public_key})
+                if err or not seeks or not seeks.get('listings'):
+                    st.caption("暂无求购信息")
+                else:
+                    for item in seeks['listings']:
+                        with st.container(border=True):
+                            st.write(f"**求购: {item['description']}**")
+                            st.caption(f"求购方: {item['lister_username']}")
+                            st.info(f"预算: **{item['price']} FC** | 类型: `{item['nft_type']}`")
+                            
+                            with st.expander("向TA报价"):
+                                my_nfts, err = api_call_cached('GET', '/nfts/my/', params={"public_key": st.session_state.public_key})
+                                eligible_nfts = [nft for nft in my_nfts.get('nfts', []) if nft['nft_type'] == item['nft_type'] and nft['status'] == 'ACTIVE'] if my_nfts else []
+                                if not eligible_nfts:
+                                    st.caption(f"你没有可用于报价的`{item['nft_type']}`类型NFT。")
                                 else:
-                                    with st.spinner("正在准备购买..."):
-                                        tx_message = {
-                                            "from_key": st.session_state.public_key,
-                                            "to_key": item['owner_key'],
-                                            "amount": item['price'],
-                                            "note": f"购买商品: {item['description'][:20]}..."
-                                        }
-                                        signed_tx = create_signed_message(tx_message)
-                                        if signed_tx:
-                                            buy_payload = {
-                                                "item_id": item_id,
-                                                "transaction_message_json": signed_tx['message_json'],
-                                                "transaction_signature": signed_tx['signature']
-                                            }
-                                            data, error = api_call('POST', '/shop/buy', payload=buy_payload)
-                                            if error:
-                                                st.error(f"购买失败: {error}")
+                                    nft_options = {f"{nft['data'].get('name', nft['nft_id'][:8])}": nft['nft_id'] for nft in eligible_nfts}
+                                    selected_nft_name = st.selectbox("选择你的NFT", options=list(nft_options.keys()), key=f"offer_nft_{item['listing_id']}")
+                                    if st.button("确认报价", key=f"offer_btn_{item['listing_id']}"):
+                                        msg_dict = {"owner_key": st.session_state.public_key, "listing_id": item['listing_id'], "offered_nft_id": nft_options[selected_nft_name], "timestamp": time.time()}
+                                        payload = create_signed_message(msg_dict)
+                                        if payload:
+                                            res, err = api_call('POST', '/market/make_offer', payload=payload)
+                                            if err: st.error(err)
                                             else:
-                                                st.success(f"购买成功！{data.get('detail')}")
-                                                st.balloons()
-                                                st.cache_data.clear() 
-                                                st.session_state.user_details = None
-                                                st.rerun()
+                                                st.success(res.get('detail')); st.cache_data.clear(); st.rerun()
 
-            with col_wanted:
-                st.info("其他人正在求购")
-                items_data, error = api_call_cached(
-                    'GET', '/shop/list',
-                    params={'item_type': 'WANTED', 'exclude_owner': st.session_state.public_key}
-                )
-                if error:
-                    st.error(f"无法加载求购商品: {error}")
-                elif not items_data or not items_data.get('items'):
-                    st.write("目前没有人发布求购信息。")
-                else:
-                    for item in items_data['items']:
-                        item_id = item['item_id']
-                        with st.container(border=True):
-                            st.write(f"**{item['description']}**")
-                            st.write(f"出价: **{item['price']} FC** | 买家: {item['username']}")
-                            if st.button("向他出售", key=f"sell_{item_id}", type="primary"):
-                                with st.spinner("正在完成交易..."):
-                                    message_dict = {
-                                        "owner_key": st.session_state.public_key, 
-                                        "item_id": item_id
-                                    }
-                                    signed_payload = create_signed_message(message_dict)
-                                    if signed_payload:
-                                        data, error = api_call('POST', '/shop/fulfill_wanted', payload=signed_payload)
-                                        if error:
-                                            st.error(f"出售失败: {error}")
-                                        else:
-                                            st.success(f"成功！{data.get('detail')}")
-                                            st.balloons()
-                                            st.cache_data.clear()
-                                            st.session_state.user_details = None
-                                            st.rerun()
-
-        with shop_post_tab:
-            st.subheader("发布一个新商品")
-            with st.form("post_item_form"):
-                item_type = st.radio("你想做什么?", ["出售商品", "求购商品"], 
-                                     captions=["我有东西，想换FC", "我有FC，想换东西"])
-                item_type_val = 'FOR_SALE' if item_type == "出售商品" else 'WANTED'
-                description = st.text_area("商品/服务描述", max_chars=100)
-                price = st.number_input("价格 (FC)", min_value=0.01, step=0.01, format="%.2f")
-                submitted = st.form_submit_button("签名并发布")
-                if submitted:
-                    if not description or price <= 0:
-                        st.error("请输入有效的描述和价格。")
-                    else:
-                        with st.spinner("正在签名并发布..."):
-                            message_dict = {
-                                "owner_key": st.session_state.public_key,
-                                "item_type": item_type_val,
-                                "description": description,
-                                "price": price
-                            }
-                            signed_payload = create_signed_message(message_dict)
-                            if signed_payload:
-                                data, error = api_call('POST', '/shop/post', payload=signed_payload)
-                                if error:
-                                    st.error(f"发布失败: {error}")
-                                else:
-                                    st.success(f"发布成功！{data.get('detail')}")
-                                    st.cache_data.clear() 
-
-        with shop_my_items_tab:
-            st.subheader("我发布的商品")
-            # <<< 核心修改 12: 使用 params 字典传递公钥
-            items_data, error = api_call_cached('GET', "/shop/my_items/", params={"public_key": st.session_state.public_key})
-            if error:
-                st.error(f"无法加载我的商品: {error}")
-            # ... (商店我的商品，剩余部分不变，省略)
-            elif not items_data or not items_data.get('items'):
-                st.info("你没有发布过任何商品。")
+        # --- 我的交易活动 ---
+        with my_activity_tab:
+            st.subheader("我的交易看板")
+            activity, err = api_call_cached('GET', '/market/my_activity', params={'public_key': st.session_state.public_key})
+            if err or not activity:
+                st.error("无法加载您的交易活动")
             else:
-                st.write("在这里你可以管理你发布的商品。")
-                for item in items_data['items']:
-                    item_id = item['item_id']
-                    status = item['status']
+                st.write("我挂出的:")
+                my_listings = activity.get('listings', [])
+                if not my_listings:
+                    st.caption("你没有发布任何挂单。")
+                else:
+                    for item in my_listings:
+                        with st.container(border=True):
+                            st.write(f"**[{item['listing_type']}]** {item['description']}")
+                            st.caption(f"状态: **{item['status']}** | 价格/预算: {item['price']} FC")
+                            if item['status'] == 'ACTIVE':
+                                if st.button("取消挂单", key=f"cancel_{item['listing_id']}"):
+                                    msg_dict = {"owner_key": st.session_state.public_key, "listing_id": item['listing_id'], "timestamp": time.time()}
+                                    payload = create_signed_message(msg_dict)
+                                    if payload:
+                                        res, err = api_call('POST', '/market/cancel_listing', payload=payload)
+                                        if err: st.error(err)
+                                        else: st.success(res.get('detail')); st.cache_data.clear(); st.rerun()
+
+                            # 如果是求购单，显示收到的报价
+                            if item['listing_type'] == 'SEEK' and item['status'] == 'ACTIVE':
+                                offers_data, err = api_call_cached('GET', '/market/offers', params={'listing_id': item['listing_id']})
+                                offers = offers_data.get('offers', []) if offers_data else []
+                                st.write("收到的报价:")
+                                if not offers:
+                                    st.caption("暂未收到报价")
+                                else:
+                                    for offer in offers:
+                                        if offer['status'] == 'PENDING':
+                                            offer_col1, offer_col2, offer_col3 = st.columns([3,1,1])
+                                            offer_col1.info(f"来自 {offer['offerer_username']} 的报价: {offer['nft_data'].get('name', offer['offered_nft_id'][:8])}")
+                                            if offer_col2.button("接受", key=f"accept_{offer['offer_id']}", type="primary"):
+                                                msg_dict = {"owner_key": st.session_state.public_key, "offer_id": offer['offer_id'], "accept": True, "timestamp": time.time()}
+                                                payload = create_signed_message(msg_dict)
+                                                if payload:
+                                                    res, err = api_call('POST', '/market/respond_offer', payload=payload)
+                                                    if err: st.error(err)
+                                                    else: st.success(res.get('detail')); st.balloons(); st.cache_data.clear(); st.rerun()
+                                            if offer_col3.button("拒绝", key=f"reject_{offer['offer_id']}"):
+                                                msg_dict = {"owner_key": st.session_state.public_key, "offer_id": offer['offer_id'], "accept": False, "timestamp": time.time()}
+                                                payload = create_signed_message(msg_dict)
+                                                if payload:
+                                                    res, err = api_call('POST', '/market/respond_offer', payload=payload)
+                                                    if err: st.error(err)
+                                                    else: st.success(res.get('detail')); st.cache_data.clear(); st.rerun()
+        # --- 铸造新品 ---
+        with create_nft_tab:
+            st.subheader("铸造工坊")
+            creatable_nfts, err = api_call_cached('GET', '/market/creatable_nfts')
+            if err or not creatable_nfts:
+                st.info("当前没有可通过商店铸造的NFT类型。")
+            else:
+                for nft_type, config in creatable_nfts.items():
                     with st.container(border=True):
-                        st.write(f"**{item['description']}** ({item['item_type'].replace('_', ' ').title()})")
-                        st.write(f"价格: **{item['price']} FC** | 状态: **{status}**")
-                        if status == 'ACTIVE':
-                            if st.button("取消发布", key=f"cancel_{item_id}"):
-                                with st.spinner("正在取消..."):
-                                    message_dict = {
-                                        "owner_key": st.session_state.public_key,
-                                        "item_id": item_id,
-                                    }
-                                    signed_payload = create_signed_message(message_dict)
-                                    if signed_payload:
-                                        data, error = api_call('POST', '/shop/cancel', payload=signed_payload)
-                                        if error:
-                                            st.error(f"取消失败: {error}")
-                                        else:
-                                            st.success(f"取消成功！{data.get('detail')}")
-                                            st.cache_data.clear() 
-                                            st.rerun()
+                        st.write(f"#### {config['name']}")
+                        st.caption(f"`{nft_type}`")
+                        st.write(config['description'])
+                        st.success(f"铸造成本: **{config['cost']} FC**")
+                        
+                        with st.form(key=f"create_form_{nft_type}"):
+                            form_data = {}
+                            for field in config.get('fields', []):
+                                if field['type'] == 'text_input':
+                                    form_data[field['name']] = st.text_input(field['label'], help=field.get('help'))
+                                elif field['type'] == 'text_area':
+                                    form_data[field['name']] = st.text_area(field['label'], help=field.get('help'))
+                                elif field['type'] == 'number_input':
+                                    form_data[field['name']] = st.number_input(
+                                        field['label'], 
+                                        min_value=field.get('min_value'), 
+                                        max_value=field.get('max_value'),
+                                        value=field.get('default'),
+                                        step=field.get('step'),
+                                        help=field.get('help')
+                                    )
+                            if st.form_submit_button("支付并铸造"):
+                                msg_dict = {
+                                    "owner_key": st.session_state.public_key,
+                                    "nft_type": nft_type,
+                                    "cost": config['cost'],
+                                    "data": form_data,
+                                    "timestamp": time.time()
+                                }
+                                payload = create_signed_message(msg_dict)
+                                if payload:
+                                    res, err = api_call('POST', '/market/create_nft', payload=payload)
+                                    if err: st.error(err)
+                                    else:
+                                        st.success(res.get('detail')); st.balloons()
+                                        st.cache_data.clear(); st.rerun()
+
     # --- 4. 收藏视图 ---
-    # <<< NFT 架构升级: 新增“我的收藏”视图 >>>
-    with tabs[3]: # 我的收藏
+    with tabs[3]: 
         st.header("🖼️ 我的收藏 (NFTs)")
         st.info("这里展示你拥有的所有独特的数字藏品。")
 
@@ -692,11 +721,8 @@ def show_main_app():
         elif not nfts_data or not nfts_data.get('nfts'):
             st.info("你的收藏还是空的，快去让管理员给你发行一些吧！")
         else:
-            # 遍历所有NFT
             for nft in nfts_data['nfts']:
                 with st.container(border=True):
-                    # 只需要调用统一的渲染入口函数，不再需要if/elif判断！
-                    # 我们将 create_signed_message 函数也作为参数传进去
                     render_nft(
                         st, 
                         nft, 
@@ -704,12 +730,11 @@ def show_main_app():
                         api_call, 
                         lambda msg: create_signed_message(msg)
                     )
-                                
+                            
     # --- 5. 管理员视图 ---
     if is_admin:
         with tabs[4]:
             st.header("管理员面板")
-            # ... (解锁逻辑不变)
             if not st.session_state.admin_ui_unlocked:
                 st.info("这是一个轻量级的UI锁，防止误操作。")
                 with st.form("admin_unlock_form"):
@@ -738,7 +763,6 @@ def show_main_app():
                     admin_tabs_list = ["货币发行", "用户管理", "💎 NFT 管理", "系统设置"]
                     admin_issue_tab, admin_manage_tab, admin_nft_tab, admin_settings_tab = st.tabs(admin_tabs_list)
                     
-                    # ... (货币发行 Tab 不变)
                     with admin_issue_tab:
                         st.subheader("增发货币 (Mint)")
                         with st.form("mint_form"):
@@ -776,7 +800,6 @@ def show_main_app():
                             target_key = user_dict[manage_user]
                             st.info(f"正在管理: **{manage_user}** (`{target_key[:15]}...`)")
                             
-                            # ... (减持和额度调整不变)
                             st.write("**减持货币 (Burn)**")
                             with st.form("burn_form"):
                                 burn_amount = st.number_input("减持金额", min_value=0.01, step=1.0)
@@ -801,7 +824,6 @@ def show_main_app():
                             st.divider()
 
                             st.write("**禁用/启用用户**")
-                            # <<< 核心修改 13: 使用 params 字典传递公钥
                             is_active_data, error = api_call('GET', "/user/details/", params={"public_key": target_key})
                             is_active = is_active_data.get('is_active', True) if is_active_data else True
 
@@ -820,7 +842,6 @@ def show_main_app():
                                     if error: st.error(f"启用失败: {error}")
                                     else: st.success(f"启用成功！{data.get('detail')}"); st.rerun()
 
-                            # ... (清除用户部分不变)
                             st.divider()
                             st.write("**彻底清除用户 (极度危险)**")
                             st.error("警告：此操作将从数据库中**彻底删除**该用户、其余额、商店物品和邀请码。用户名将被释放。此操作无法撤销！")
@@ -839,7 +860,6 @@ def show_main_app():
                                                 st.cache_data.clear() 
                                                 st.rerun()
 
-                            # 核心修改 1: (新增UI) 增加查询用户私钥的功能
                             st.divider()
                             st.write("**查询用户私钥 (高风险操作)**")
                             st.error("警告：此操作将会在界面上显示用户的私钥。请确保在安全的环境下操作，不要截图或分享。")
@@ -877,7 +897,6 @@ def show_main_app():
                                     f"copy_retrieved_pk_{target_key}"
                                 )
                     
-                    # <<< 插件V2.0: 修改 NFT 管理标签页 UI >>>
                     with admin_nft_tab:
                         st.subheader("💎 NFT 铸造与发行")
                         
@@ -899,8 +918,6 @@ def show_main_app():
                             
                             st.write("**输入该类型 NFT 所需的初始数据 (JSON 格式):**")
                             
-                            # --- <<< 移除硬编码的 IF/ELSE 块 >>> ---
-                            # 动态获取所选类型的帮助信息和默认值
                             mint_info = get_mint_info_for_type(selected_nft_type)
                             
                             if mint_info["help_text"]:
@@ -911,7 +928,6 @@ def show_main_app():
                                 mint_info["default_json"],
                                 height=150
                             )
-                            # --- <<< 动态加载结束 >>> ---
 
                             if st.form_submit_button("确认铸造", type="primary"):
                                 if not mint_to_key_input or not selected_nft_type:
@@ -932,8 +948,7 @@ def show_main_app():
                                             st.balloons()
                                     except json.JSONDecodeError:
                                         st.error("初始数据不是有效的 JSON 格式！") 
-                                         
-                    # ... (系统设置和监控中心 Tab 不变)
+                                        
                     with admin_settings_tab:
                         st.subheader("系统设置")
                         st.write("**邀请系统设置**")

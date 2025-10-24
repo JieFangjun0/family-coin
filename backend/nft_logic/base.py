@@ -41,3 +41,24 @@ class NFTLogicHandler(ABC):
         :return: (是否成功, 消息, 更新后的 data 字典)。
         """
         pass
+    
+    # <<< 新增功能: 商店配置接口 >>>
+    @classmethod
+    def get_shop_config(cls) -> dict:
+        """
+        (类方法) 返回该NFT在商店中的创建配置。
+        如果返回非空字典，表示该NFT可以通过商店创建。
+        返回格式:
+        {
+            "creatable": True,
+            "cost": 10.0, # 创建所需FC
+            "name": "秘密愿望",
+            "description": "支付FC来封存一个秘密，它将在指定时间后消失。",
+            "fields": [
+                {"name": "description", "label": "公开描述", "type": "textarea", "required": True},
+                {"name": "content", "label": "秘密内容", "type": "textarea", "required": True},
+                {"name": "destroy_in_days", "label": "销毁天数", "type": "number", "required": True, "default": 7}
+            ]
+        }
+        """
+        return {"creatable": False}
