@@ -168,19 +168,34 @@ def get_nft_by_id(nft_id: str) -> dict:
     """根据 ID 获取单个 NFT 的详细信息。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM nfts WHERE nft_id = ?", (nft_id,))
+        # <<< 核心修复 1: 将 created_at 转换为 Unix 时间戳 (float) >>>
+        query = """
+            SELECT nft_id, owner_key, nft_type, data, status, 
+                   CAST(strftime('%s', created_at) AS REAL) as created_at
+            FROM nfts 
+            WHERE nft_id = ?
+        """
+        cursor.execute(query, (nft_id,))
         nft = cursor.fetchone()
         if not nft:
             return None
         nft_dict = dict(nft)
-        nft_dict['data'] = json.loads(nft_dict['data']) # 将 JSON 字符串反序列化为字典
+        nft_dict['data'] = json.loads(nft_dict['data'])
         return nft_dict
 
 def get_nfts_by_owner(owner_key: str) -> list:
     """获取指定所有者的所有 NFT。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM nfts WHERE owner_key = ? AND status = 'ACTIVE' ORDER BY created_at DESC", (owner_key,))
+        # <<< 核心修复 2: 将 created_at 转换为 Unix 时间戳 (float) >>>
+        query = """
+            SELECT nft_id, owner_key, nft_type, data, status, 
+                   CAST(strftime('%s', created_at) AS REAL) as created_at
+            FROM nfts 
+            WHERE owner_key = ? AND status = 'ACTIVE' 
+            ORDER BY created_at DESC
+        """
+        cursor.execute(query, (owner_key,))
         nfts = []
         for row in cursor.fetchall():
             nft_dict = dict(row)
