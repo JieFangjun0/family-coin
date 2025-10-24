@@ -146,9 +146,10 @@ class GenesisRegisterRequest(BaseModel):
     username: str
     genesis_password: str
 
+import os
 # --- 管理员认证 ---
-ADMIN_SECRET_KEY = "JIEFANGJUNISKING" # !! 部署前必须修改 !!
-GENESIS_PASSWORD = "INIT_FAMILY_COIN" # !! 这是你的创世密码，只用一次 !!
+ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
+GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
 
 def verify_admin(x_admin_secret: str = Header(None)):
     """FastAPI 依赖项，用于检查管理员秘密。"""

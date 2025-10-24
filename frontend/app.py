@@ -20,7 +20,7 @@ import pytz
 # --- 配置 ---
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 TIMEZONE = pytz.timezone('Asia/Shanghai')
-ADMIN_UI_PASSWORD = "j"
+ADMIN_UI_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", "j")
 
 st.set_page_config(page_title="FamilyCoin V2.2", layout="wide")
 st.title("🪙 FamilyCoin V2.2 (家庭货币)")
