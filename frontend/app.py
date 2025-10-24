@@ -610,44 +610,46 @@ def show_main_app():
                                                 st.success(res.get('detail')); st.cache_data.clear(); st.rerun()
 
         # --- 我的交易活动 ---
-        with st.container(border=True):
-            st.subheader("发布求购")
-            st.info("发布一个求购信息，让拥有你所需 NFT 的人来找你。发布时将暂时托管你的预算资金。")
-            
-            all_nft_types, err = api_call_cached('GET', '/nfts/types')
-            if err or not all_nft_types:
-                # 如果API调用失败，提供一个后备选项
-                all_nft_types = ["SECRET_WISH"] 
+        with my_activity_tab:
+            st.subheader("我的交易看板")
+            with st.container(border=True):
+                st.subheader("发布求购")
+                st.info("发布一个求购信息，让拥有你所需 NFT 的人来找你。发布时将暂时托管你的预算资金。")
+                
+                all_nft_types, err = api_call_cached('GET', '/nfts/types')
+                if err or not all_nft_types:
+                    # 如果API调用失败，提供一个后备选项
+                    all_nft_types = ["SECRET_WISH"] 
 
-            with st.form(key="seek_form"):
-                seek_nft_type = st.selectbox("求购的 NFT 类型", options=all_nft_types)
-                seek_description = st.text_input("求购描述", placeholder="例如：求一个金色的宠物")
-                seek_price = st.number_input("我的预算 (FC)", min_value=0.01, step=1.0, format="%.2f")
+                with st.form(key="seek_form"):
+                    seek_nft_type = st.selectbox("求购的 NFT 类型", options=all_nft_types)
+                    seek_description = st.text_input("求购描述", placeholder="例如：求一个金色的宠物")
+                    seek_price = st.number_input("我的预算 (FC)", min_value=0.01, step=1.0, format="%.2f")
 
-                if st.form_submit_button("发布求购信息", type="primary"):
-                    if not seek_description:
-                        st.error("求购描述不能为空")
-                    else:
-                        with st.spinner("正在发布求购..."):
-                            msg_dict = {
-                                "owner_key": st.session_state.public_key,
-                                "listing_type": "SEEK",
-                                "nft_id": None,
-                                "nft_type": seek_nft_type,
-                                "description": seek_description,
-                                "price": seek_price,
-                                "auction_hours": None,
-                                "timestamp": time.time()
-                            }
-                            payload = create_signed_message(msg_dict)
-                            if payload:
-                                res, err = api_call('POST', '/market/create_listing', payload=payload)
-                                if err:
-                                    st.error(f"发布求购失败: {err}")
-                                else:
-                                    st.success(res.get('detail'))
-                                    st.cache_data.clear()
-                                    st.rerun()
+                    if st.form_submit_button("发布求购信息", type="primary"):
+                        if not seek_description:
+                            st.error("求购描述不能为空")
+                        else:
+                            with st.spinner("正在发布求购..."):
+                                msg_dict = {
+                                    "owner_key": st.session_state.public_key,
+                                    "listing_type": "SEEK",
+                                    "nft_id": None,
+                                    "nft_type": seek_nft_type,
+                                    "description": seek_description,
+                                    "price": seek_price,
+                                    "auction_hours": None,
+                                    "timestamp": time.time()
+                                }
+                                payload = create_signed_message(msg_dict)
+                                if payload:
+                                    res, err = api_call('POST', '/market/create_listing', payload=payload)
+                                    if err:
+                                        st.error(f"发布求购失败: {err}")
+                                    else:
+                                        st.success(res.get('detail'))
+                                        st.cache_data.clear()
+                                        st.rerun()
             st.divider()
             activity, err = api_call_cached('GET', '/market/my_activity', params={'public_key': st.session_state.public_key})
             if err or not activity:
