@@ -15,7 +15,8 @@ from shared.crypto_utils import (
 )
 from datetime import datetime
 import pytz
-# from urllib.parse import quote # <<< 不再需要这个了
+# <<< NFT前端插件: 导入统一的渲染路由函数 >>>
+from frontend.nft_renderers import render_nft, get_mint_info_for_type
 
 # --- 配置 ---
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
@@ -48,8 +49,7 @@ def init_session_state():
             st.session_state[key] = value
 
 init_session_state()
-
-# ... (st_copy_to_clipboard_button 函数不变，省略)
+    
 def st_copy_to_clipboard_button(text_to_copy, button_text, key):
     """
     显示一个按钮，点击时将文本复制到剪贴板。
@@ -438,9 +438,12 @@ def show_main_app():
             
     # --- 主导航 ---
     is_admin = details and details.get('invited_by') == 'GENESIS'
-    tabs_list = ["我的钱包", "转账", "🛒 商店"]
+    # <<< NFT 架构升级: 在主导航中增加“我的收藏” >>>
+    tabs_list = ["我的钱包", "转账", "🛒 商店", "🖼️ 我的收藏"]
+    
     if is_admin:
         tabs_list.append("⭐ 管理员 ⭐")
+    
     tabs = st.tabs(tabs_list)
 
     # --- 1. 钱包视图 ---
@@ -483,7 +486,6 @@ def show_main_app():
 
     # --- 2. 转账视图 ---
     with tabs[1]:
-        # ... (转账视图不变，省略)
         st.header("发起转账")
         
         user_dict = get_all_users_dict()
@@ -613,7 +615,6 @@ def show_main_app():
                                             st.rerun()
 
         with shop_post_tab:
-            # ... (商店发布部分不变，省略)
             st.subheader("发布一个新商品")
             with st.form("post_item_form"):
                 item_type = st.radio("你想做什么?", ["出售商品", "求购商品"], 
@@ -675,10 +676,38 @@ def show_main_app():
                                             st.success(f"取消成功！{data.get('detail')}")
                                             st.cache_data.clear() 
                                             st.rerun()
-                                            
-    # --- 4. 管理员视图 ---
+    # --- 4. 收藏视图 ---
+    # <<< NFT 架构升级: 新增“我的收藏”视图 >>>
+    with tabs[3]: # 我的收藏
+        st.header("🖼️ 我的收藏 (NFTs)")
+        st.info("这里展示你拥有的所有独特的数字藏品。")
+
+        balance_data, _ = api_call_cached('GET', "/balance/", params={"public_key": st.session_state.public_key})
+        balance = balance_data.get('balance', 0.0) if balance_data else 0.0
+
+        nfts_data, error = api_call_cached('GET', '/nfts/my/', params={"public_key": st.session_state.public_key})
+
+        if error:
+            st.error(f"无法加载你的收藏: {error}")
+        elif not nfts_data or not nfts_data.get('nfts'):
+            st.info("你的收藏还是空的，快去让管理员给你发行一些吧！")
+        else:
+            # 遍历所有NFT
+            for nft in nfts_data['nfts']:
+                with st.container(border=True):
+                    # 只需要调用统一的渲染入口函数，不再需要if/elif判断！
+                    # 我们将 create_signed_message 函数也作为参数传进去
+                    render_nft(
+                        st, 
+                        nft, 
+                        balance, 
+                        api_call, 
+                        lambda msg: create_signed_message(msg)
+                    )
+                                
+    # --- 5. 管理员视图 ---
     if is_admin:
-        with tabs[3]:
+        with tabs[4]:
             st.header("管理员面板")
             # ... (解锁逻辑不变)
             if not st.session_state.admin_ui_unlocked:
@@ -692,7 +721,6 @@ def show_main_app():
                         else:
                             st.error("密码错误")
             else:
-                # ... (管理员面板剩余代码不变, 但有一处小修改)
                 st.success("管理员UI已解锁。")
                 if st.button("锁定UI"):
                     st.session_state.admin_ui_unlocked = False
@@ -707,7 +735,8 @@ def show_main_app():
                     admin_headers = {"X-Admin-Secret": admin_secret}
                     user_dict = get_all_users_dict(force_refresh=True) 
                     user_options = sorted(list(user_dict.keys()))
-                    admin_issue_tab, admin_manage_tab, admin_settings_tab = st.tabs(["货币发行", "用户管理", "系统设置"])
+                    admin_tabs_list = ["货币发行", "用户管理", "💎 NFT 管理", "系统设置"]
+                    admin_issue_tab, admin_manage_tab, admin_nft_tab, admin_settings_tab = st.tabs(admin_tabs_list)
                     
                     # ... (货币发行 Tab 不变)
                     with admin_issue_tab:
@@ -847,7 +876,63 @@ def show_main_app():
                                     "点此复制该私钥",
                                     f"copy_retrieved_pk_{target_key}"
                                 )
-                                        
+                    
+                    # <<< 插件V2.0: 修改 NFT 管理标签页 UI >>>
+                    with admin_nft_tab:
+                        st.subheader("💎 NFT 铸造与发行")
+                        
+                        nft_types, error = api_call_cached('GET', '/admin/nft/types', headers=admin_headers)
+                        if error:
+                            st.error(f"无法获取 NFT 类型: {error}")
+                            nft_type_options = []
+                        else:
+                            nft_type_options = nft_types
+
+                        with st.form("mint_nft_form"):
+                            st.info("在这里，你可以为系统中的任何用户铸造一个新的、独一无二的数字资产。")
+                            
+                            selected_username = st.selectbox("选择接收用户", options=[""] + user_options, key="admin_mint_nft_user")
+                            mint_to_key = user_dict.get(selected_username, "") if selected_username else ""
+                            mint_to_key_input = st.text_area("目标公钥", value=mint_to_key, height=100)
+                            
+                            selected_nft_type = st.selectbox("选择要铸造的 NFT 类型", options=nft_type_options)
+                            
+                            st.write("**输入该类型 NFT 所需的初始数据 (JSON 格式):**")
+                            
+                            # --- <<< 移除硬编码的 IF/ELSE 块 >>> ---
+                            # 动态获取所选类型的帮助信息和默认值
+                            mint_info = get_mint_info_for_type(selected_nft_type)
+                            
+                            if mint_info["help_text"]:
+                                st.help(mint_info["help_text"])
+                                
+                            initial_data_str = st.text_area(
+                                "初始数据", 
+                                mint_info["default_json"],
+                                height=150
+                            )
+                            # --- <<< 动态加载结束 >>> ---
+
+                            if st.form_submit_button("确认铸造", type="primary"):
+                                if not mint_to_key_input or not selected_nft_type:
+                                    st.error("请选择用户和 NFT 类型。")
+                                else:
+                                    try:
+                                        initial_data = json.loads(initial_data_str)
+                                        payload = {
+                                            "to_key": mint_to_key_input,
+                                            "nft_type": selected_nft_type,
+                                            "data": initial_data
+                                        }
+                                        data, error = api_call('POST', '/admin/nft/mint', payload=payload, headers=admin_headers)
+                                        if error:
+                                            st.error(f"NFT 铸造失败: {error}")
+                                        else:
+                                            st.success(f"NFT 铸造成功！{data.get('detail')}")
+                                            st.balloons()
+                                    except json.JSONDecodeError:
+                                        st.error("初始数据不是有效的 JSON 格式！") 
+                                         
                     # ... (系统设置和监控中心 Tab 不变)
                     with admin_settings_tab:
                         st.subheader("系统设置")

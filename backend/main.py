@@ -13,9 +13,9 @@ from shared.crypto_utils import (
     verify_signature
 )
 from backend import ledger
-
+# <<< NFT 架构升级: 导入 NFT 逻辑模块 >>>
+from backend.nft_logic import get_handler, get_available_nft_types
 # --- Pydantic 模型定义 (API的数据结构) ---
-# ... (这部分模型定义完全不变，所以省略)
 class UserRegisterRequest(BaseModel):
     username: str
     invitation_code: str
@@ -66,6 +66,35 @@ class ErrorResponse(BaseModel):
 class SuccessResponse(BaseModel):
     detail: str
 
+# <<< NFT 架构升级: 新增 NFT 相关的 Pydantic 模型 >>>
+
+class AdminMintNFTRequest(BaseModel):
+    to_key: str
+    nft_type: str
+    data: dict # 初始数据，由对应 handler 的 mint 方法定义
+
+class NFTActionMessage(BaseModel):
+    owner_key: str
+    nft_id: str
+    action: str
+    action_data: Optional[dict] = None
+    timestamp: float
+
+class NFTActionRequest(BaseModel):
+    message_json: str
+    signature: str
+
+class NFTResponse(BaseModel):
+    nft_id: str
+    owner_key: str
+    nft_type: str
+    data: dict
+    created_at: float
+    status: str
+
+class NFTListResponse(BaseModel):
+    nfts: List[NFTResponse]
+    
 # --- Admin Pydantic 模型 ---
 class AdminIssueRequest(BaseModel):
     to_key: str 
@@ -102,7 +131,7 @@ class AdminSetUserActiveStatusRequest(BaseModel):
 class AdminBalancesResponse(BaseModel):
     balances: List[dict]
 
-# 核心修改 1: (新增模型) 用于返回管理员查询的私钥
+# 用于返回管理员查询的私钥
 class AdminPrivateKeyResponse(BaseModel):
     public_key: str
     private_key: str
@@ -164,9 +193,9 @@ def verify_admin(x_admin_secret: str = Header(None)):
 
 # --- FastAPI 应用实例 ---
 app = FastAPI(
-    title="FamilyCoin API (V2.2 - Patched)",
-    description="一个用于家庭和朋友的中心化玩具加密货币API (带邀请和商店)",
-    version="0.2.2"
+    title="FamilyCoin API (V0.2.0 - NFT Framework)",
+    description="一个用于家庭和朋友的中心化玩具加密货币API (带邀请、商店和NFT框架)",
+    version="0.2.0"
 )
 
 @app.on_event("startup")
@@ -213,8 +242,8 @@ def api_genesis_register(request: GenesisRegisterRequest):
     )
 
 # --- 辅助函数：验证签名 ---
-def get_verified_message(request: SignedShopRequest, model: BaseModel):
-    """验证签名并返回反序列化的消息体。"""
+def get_verified_nft_action_message(request: NFTActionRequest, model: BaseModel):
+    """验证 NFT 动作签名并返回反序列化的消息体。"""
     try:
         message_dict = json.loads(request.message_json)
         message = model(**message_dict)
@@ -336,8 +365,57 @@ def api_get_my_invitations(public_key: str):
     codes = ledger.get_my_invitation_codes(public_key)
     return InvitationCodeListResponse(codes=codes)
 
-# --- 商店接口 (Shop API) ---
+# --- NFT 接口 (NFT API) ---
 
+@app.get("/nfts/my/", response_model=NFTListResponse, tags=["NFT"])
+def api_get_my_nfts(public_key: str):
+    """获取指定公钥拥有的所有 NFT。"""
+    if not public_key:
+        raise HTTPException(status_code=400, detail="必须提供公钥")
+    nfts = ledger.get_nfts_by_owner(public_key)
+    return NFTListResponse(nfts=nfts)
+
+@app.get("/nfts/{nft_id}", response_model=NFTResponse, tags=["NFT"])
+def api_get_nft_details(nft_id: str):
+    """获取单个 NFT 的详细信息。"""
+    nft = ledger.get_nft_by_id(nft_id)
+    if not nft:
+        raise HTTPException(status_code=404, detail="未找到该 NFT")
+    return NFTResponse(**nft)
+
+@app.post("/nfts/action", response_model=SuccessResponse, tags=["NFT"])
+def api_perform_nft_action(request: NFTActionRequest):
+    """(需签名) 对一个 NFT 执行一个动作 (如 '揭示')。"""
+    message = get_verified_nft_action_message(request, NFTActionMessage)
+    
+    # 1. 获取 NFT 实例
+    nft = ledger.get_nft_by_id(message.nft_id)
+    if not nft or nft['owner_key'] != message.owner_key:
+        raise HTTPException(status_code=404, detail="未找到 NFT 或你不是所有者")
+
+    # 2. 获取对应的逻辑处理器
+    handler = get_handler(nft['nft_type'])
+    if not handler:
+        raise HTTPException(status_code=501, detail=f"不支持的 NFT 类型: {nft['nft_type']}")
+
+    # 3. 验证动作合法性
+    is_valid, reason = handler.validate_action(nft, message.action, message.action_data, message.owner_key)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=reason)
+
+    # 4. 执行动作
+    success, detail, updated_data = handler.perform_action(nft, message.action, message.action_data, message.owner_key)
+    if not success:
+        raise HTTPException(status_code=500, detail=detail)
+
+    # 5. 将更新后的 data 写回数据库
+    update_success, update_detail = ledger.update_nft(message.nft_id, updated_data)
+    if not update_success:
+        # 这是一个关键的错误，表示逻辑执行了但数据没保存
+        raise HTTPException(status_code=500, detail=f"执行成功但数据更新失败: {update_detail}")
+
+    return SuccessResponse(detail=detail)
+# --- 商店接口 (Shop API) ---
 @app.get("/shop/list", response_model=ShopItemResponse, tags=["Shop"])
 def api_get_shop_items(item_type: Optional[str] = None, exclude_owner: Optional[str] = None):
     """(V2) 获取商店商品列表。"""
@@ -477,6 +555,36 @@ def api_admin_purge_user(request: AdminPurgeUserRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
+# <<< NFT 架构升级: 新增管理员 NFT 接口 >>>
+
+@app.get("/admin/nft/types", response_model=List[str], tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
+def api_admin_get_nft_types():
+    """(管理员) 获取所有已注册的、可发行的 NFT 类型。"""
+    return get_available_nft_types()
+
+@app.post("/admin/nft/mint", response_model=SuccessResponse, tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
+def api_admin_mint_nft(request: AdminMintNFTRequest):
+    """(管理员) 铸造并发行一个新的 NFT 给指定用户。"""
+    # 1. 获取对应的逻辑处理器
+    handler = get_handler(request.nft_type)
+    if not handler:
+        raise HTTPException(status_code=400, detail=f"不存在的 NFT 类型: {request.nft_type}")
+
+    # 2. 使用 handler 的 mint 方法来处理初始数据和铸造逻辑
+    success, detail, db_data = handler.mint(request.to_key, request.data)
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+
+    # 3. 将 handler 返回的、格式化好的数据存入数据库
+    success, detail, nft_id = ledger.mint_nft(
+        owner_key=request.to_key,
+        nft_type=request.nft_type,
+        data=db_data
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail=detail)
+        
+    return SuccessResponse(detail=f"成功为用户 {request.to_key[:10]}... 铸造了 NFT (ID: {nft_id[:8]}...)！消息: {detail}")
 @app.get("/admin/balances", response_model=AdminBalancesResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_get_all_balances():
     """(管理员) 监控所有用户的余额。"""

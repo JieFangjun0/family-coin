@@ -3,19 +3,18 @@ import time
 import uuid
 import threading
 import json
-import os # (问题 3) 需要 os 模块来删除文件
+import os
 from contextlib import contextmanager
 from shared.crypto_utils import verify_signature
 
-DATABASE_PATH = '/app/data/ledger.db' # Docker 容器内的路径
-LEDGER_LOCK = threading.Lock() # 确保数据库写入操作的线程安全
+DATABASE_PATH = '/app/data/ledger.db'
+LEDGER_LOCK = threading.Lock()
 
 # --- 系统保留账户 ---
-GENESIS_ACCOUNT = "JFJ_GENESIS" # 用于表示“铸币”的来源
-BURN_ACCOUNT = "JFJ_BURN"      # 用于表示“销毁”的目的地
-ESCROW_ACCOUNT = "JFJ_ESCROW"  # (新增) 用于托管求购资金
+GENESIS_ACCOUNT = "JFJ_GENESIS"
+BURN_ACCOUNT = "JFJ_BURN"
+ESCROW_ACCOUNT = "JFJ_ESCROW"
 
-# 默认设置
 DEFAULT_INVITATION_QUOTA = 3
 
 @contextmanager
@@ -24,7 +23,7 @@ def get_db_connection():
     conn = None
     try:
         conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row # 让查询结果可以像字典一样访问
+        conn.row_factory = sqlite3.Row
         yield conn
     except Exception as e:
         print(f"数据库连接失败: {e}")
@@ -39,7 +38,7 @@ def init_db():
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # --- 用户表 (核心修改 1: 增加 private_key_pem 字段) ---
+        # --- 用户表 ---
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             public_key TEXT PRIMARY KEY,
@@ -74,7 +73,7 @@ def init_db():
         )
         ''')
         
-        # --- 商店物品表 ---
+        # --- 商店物品表 (FT) ---
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS shop_items (
             item_id TEXT PRIMARY KEY,
@@ -87,6 +86,23 @@ def init_db():
             FOREIGN KEY (owner_key) REFERENCES users (public_key)
         )
         ''')
+
+        # <<< NFT 架构升级: 新建 nfts 表 >>>
+        # 这是所有非同质化资产的“户籍中心”。
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS nfts (
+            nft_id TEXT PRIMARY KEY,
+            owner_key TEXT NOT NULL,
+            nft_type TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'ACTIVE',
+            FOREIGN KEY (owner_key) REFERENCES users (public_key)
+        )
+        ''')
+        # 为常用查询建立索引
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nfts_owner_key ON nfts (owner_key)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nfts_nft_type ON nfts (nft_type)")
         
         # --- 设置表 ---
         cursor.execute('''
@@ -111,7 +127,6 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_codes_generated_by ON invitation_codes (generated_by)"
         )
         
-        # 插入默认设置
         cursor.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             ('default_invitation_quota', str(DEFAULT_INVITATION_QUOTA))
@@ -119,6 +134,78 @@ def init_db():
         
         conn.commit()
     print("数据库初始化完成。")
+
+# <<< NFT 架构升级: 新增 NFT 数据库核心函数 >>>
+
+def mint_nft(owner_key: str, nft_type: str, data: dict) -> (bool, str, str):
+    """(底层) 将一个新的 NFT 记录到数据库中。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            nft_id = str(uuid.uuid4())
+            data_json = json.dumps(data, ensure_ascii=False)
+
+            cursor.execute("SELECT 1 FROM users WHERE public_key = ?", (owner_key,))
+            if not cursor.fetchone():
+                return False, "NFT所有者不存在", None
+
+            cursor.execute(
+                "INSERT INTO nfts (nft_id, owner_key, nft_type, data, status) VALUES (?, ?, ?, ?, 'ACTIVE')",
+                (nft_id, owner_key, nft_type, data_json)
+            )
+            conn.commit()
+            return True, "NFT 铸造成功", nft_id
+        except Exception as e:
+            conn.rollback()
+            return False, f"NFT 铸造时数据库出错: {e}", None
+
+def get_nft_by_id(nft_id: str) -> dict:
+    """根据 ID 获取单个 NFT 的详细信息。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM nfts WHERE nft_id = ?", (nft_id,))
+        nft = cursor.fetchone()
+        if not nft:
+            return None
+        nft_dict = dict(nft)
+        nft_dict['data'] = json.loads(nft_dict['data']) # 将 JSON 字符串反序列化为字典
+        return nft_dict
+
+def get_nfts_by_owner(owner_key: str) -> list:
+    """获取指定所有者的所有 NFT。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM nfts WHERE owner_key = ? ORDER BY created_at DESC", (owner_key,))
+        nfts = []
+        for row in cursor.fetchall():
+            nft_dict = dict(row)
+            nft_dict['data'] = json.loads(nft_dict['data'])
+            nfts.append(nft_dict)
+        return nfts
+
+def update_nft(nft_id: str, new_data: dict, new_status: str = None) -> (bool, str):
+    """更新 NFT 的 data 或 status 字段。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            data_json = json.dumps(new_data, ensure_ascii=False)
+            
+            if new_status:
+                cursor.execute(
+                    "UPDATE nfts SET data = ?, status = ? WHERE nft_id = ?",
+                    (data_json, new_status, nft_id)
+                )
+            else:
+                cursor.execute("UPDATE nfts SET data = ? WHERE nft_id = ?", (data_json, nft_id))
+
+            if cursor.rowcount == 0:
+                return False, "未找到要更新的 NFT"
+            
+            conn.commit()
+            return True, "NFT 更新成功"
+        except Exception as e:
+            conn.rollback()
+            return False, f"更新 NFT 时数据库出错: {e}"
 
 def get_setting(key: str) -> str:
     """从设置表获取一个值。"""
@@ -452,14 +539,12 @@ def admin_delete_user(public_key: str) -> (bool, str):
             conn.rollback()
             return False, f"禁用用户失败: {e}"
 
-# (问题 2 修复) 新增彻底清除用户功能
 def admin_purge_user(public_key: str) -> (bool, str):
     """(管理员功能) 彻底清除一个用户的数据以释放用户名。"""
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
             
-            # 1. 检查用户是否存在
             cursor.execute("SELECT balance FROM balances WHERE public_key = ?", (public_key,))
             balance_row = cursor.fetchone()
             if not balance_row: 
@@ -467,7 +552,6 @@ def admin_purge_user(public_key: str) -> (bool, str):
             
             current_balance = balance_row['balance']
 
-            # 2. 销毁剩余资产
             if current_balance > 0:
                 success, detail = _create_system_transaction(
                     from_key=public_key, to_key=BURN_ACCOUNT, amount=current_balance,
@@ -477,16 +561,14 @@ def admin_purge_user(public_key: str) -> (bool, str):
                     conn.rollback()
                     return False, f"清除用户时清零资产失败: {detail}"
 
-            # 3. 从所有相关表中删除 (注意顺序)
-            # 不从 transactions 表删除，以保留历史
-            
-            # 删除商店物品
+            # <<< NFT 架构升级: 增加 NFT 相关清理 >>>
+            # 1. 烧毁该用户的所有 NFT (或者转移给系统, 这里选择更新状态为BURNED)
+            cursor.execute("UPDATE nfts SET status = 'BURNED' WHERE owner_key = ?", (public_key,))
+
+            # 2. 从所有相关表中删除 (注意顺序)
             cursor.execute("DELETE FROM shop_items WHERE owner_key = ?", (public_key,))
-            # 删除邀请码
             cursor.execute("DELETE FROM invitation_codes WHERE generated_by = ? OR used_by = ?", (public_key, public_key))
-            # 删除余额
             cursor.execute("DELETE FROM balances WHERE public_key = ?", (public_key,))
-            # 最后删除用户 (因为其他表可能有外键)
             cursor.execute("DELETE FROM users WHERE public_key = ?", (public_key,))
 
             conn.commit()
