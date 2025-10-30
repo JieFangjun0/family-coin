@@ -8,6 +8,15 @@ class NFTLogicHandler(ABC):
     定义了每个 NFT 类型必须实现的标准化接口。
     """
 
+    @classmethod
+    def get_display_name(cls) -> str:
+        """
+        (类方法) 返回该 NFT 类型的中文显示名称。
+        这是为了实现前端UI的解耦。
+        """
+        # 提供一个安全的默认值，以防有插件忘记实现它
+        return cls.__name__.replace("Handler", "")
+    # <<< --- 新增代码结束 --- >>>
     @abstractmethod
     def mint(self, owner_key: str, data: dict, owner_username: str = None) -> (bool, str, dict):
          """

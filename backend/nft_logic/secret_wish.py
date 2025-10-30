@@ -9,7 +9,9 @@ class SecretWishHandler(NFTLogicHandler):
     """
     “秘密愿望” NFT 的逻辑处理器。
     """
-
+    @classmethod
+    def get_display_name(cls) -> str:
+        return "秘密"
     def mint(self, owner_key: str, data: dict, owner_username: str = None) -> (bool, str, dict):
         """
         铸造一个新的“秘密愿望”。

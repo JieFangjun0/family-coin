@@ -135,7 +135,10 @@ def init_db():
         cursor.execute('CREATE TABLE IF NOT EXISTS invitation_codes (code TEXT PRIMARY KEY, generated_by TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_used BOOLEAN DEFAULT 0, used_by TEXT, FOREIGN KEY (generated_by) REFERENCES users (public_key))')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_codes_generated_by ON invitation_codes (generated_by)")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('default_invitation_quota', str(DEFAULT_INVITATION_QUOTA)))
-        
+        # 添加新用户注册奖励的默认设置
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('welcome_bonus_amount', '500'))
+        # 添加邀请人成功邀请新用户的奖励设置
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('inviter_bonus_amount', '200'))
         conn.commit()
         print("数据库初始化完成 (V3.0 Market)。")
 
@@ -670,7 +673,50 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
             )
             
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
-            
+            # <<< --- 新增代码: 发放新用户奖励 --- >>>
+            cursor.execute("SELECT value FROM settings WHERE key = ?", ('welcome_bonus_amount',))
+            bonus_setting = cursor.fetchone()
+            if bonus_setting:
+                try:
+                    bonus_amount = float(bonus_setting['value'])
+                    if bonus_amount > 0:
+                        # 调用内部系统交易逻辑，从创世账户给新用户发钱
+                        success_bonus, detail_bonus = _execute_system_tx_logic(
+                            from_key=GENESIS_ACCOUNT,
+                            to_key=public_key,
+                            amount=bonus_amount,
+                            note="新用户注册奖励",
+                            conn=conn  # 使用当前的数据库连接以确保事务原子性
+                        )
+                        if not success_bonus:
+                            # 如果奖励发放失败，回滚整个注册过程
+                            conn.rollback()
+                            return False, f"用户创建成功但奖励发放失败: {detail_bonus}"
+                except (ValueError, TypeError):
+                    # 如果数据库中的值不是有效的数字，则忽略
+                    pass 
+            # <<< --- 新增代码结束 --- >>>
+            # <<< --- 新增代码: 发放邀请人奖励 --- >>>
+            cursor.execute("SELECT value FROM settings WHERE key = ?", ('inviter_bonus_amount',))
+            inviter_bonus_setting = cursor.fetchone()
+            if inviter_bonus_setting:
+                try:
+                    inviter_bonus_amount = float(inviter_bonus_setting['value'])
+                    # 确保奖励大于0，并且不给创世账号发奖励
+                    if inviter_bonus_amount > 0 and inviter_key != GENESIS_ACCOUNT:
+                        success_inviter_bonus, detail_inviter_bonus = _execute_system_tx_logic(
+                            from_key=GENESIS_ACCOUNT,
+                            to_key=inviter_key,
+                            amount=inviter_bonus_amount,
+                            note=f"成功邀请新用户: {username}",
+                            conn=conn
+                        )
+                        if not success_inviter_bonus:
+                            conn.rollback()
+                            return False, f"用户创建成功但邀请奖励发放失败: {detail_inviter_bonus}"
+                except (ValueError, TypeError):
+                    pass # 如果设置值无效则忽略
+            # <<< --- 新增代码结束 --- >>>
             cursor.execute(
                 "UPDATE invitation_codes SET is_used = 1, used_by = ? WHERE code = ?",
                 (public_key, invitation_code)

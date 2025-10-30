@@ -380,6 +380,13 @@ def api_get_my_invitations(public_key: str):
     return InvitationCodeListResponse(codes=codes)
 
 # --- NFT 接口 ---
+@app.get("/nfts/display_names", tags=["NFT"])
+def api_get_nft_display_names():
+    """获取所有 NFT 类型的 KEY -> 中文显示名称 映射。"""
+    names = {}
+    for nft_type, handler_class in NFT_HANDLERS.items():
+        names[nft_type] = handler_class.get_display_name()
+    return names
 @app.get("/nfts/my/", response_model=NFTListResponse, tags=["NFT"])
 def api_get_my_nfts(public_key: str):
     if not public_key:
