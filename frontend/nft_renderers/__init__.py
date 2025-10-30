@@ -48,7 +48,7 @@ def default_renderer(st, nft, *args, **kwargs):
     st.json(nft.get('data', {}))
 
 # --- 统一渲染路由 (微调) ---
-def render_nft(st, nft, balance, api_call_func, create_signed_message_func):
+def render_nft(st, nft, balance, api_call_func, create_signed_message_func, view_context="collection"):
     nft_type = nft.get("nft_type")
     
     # <<< 插件V2.0: 更新字典访问方式 >>>
@@ -56,7 +56,7 @@ def render_nft(st, nft, balance, api_call_func, create_signed_message_func):
     renderer_func = NFT_RENDERERS.get(nft_type, {}).get("render", default_renderer)
     
     try:
-        renderer_func(st, nft, balance, api_call_func, create_signed_message_func)
+        renderer_func(st, nft, balance, api_call_func, create_signed_message_func, view_context=view_context)
     except Exception as e:
         st.error(f"渲染 NFT (类型: {nft_type}) 时出错: {e}")
 

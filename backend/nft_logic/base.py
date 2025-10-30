@@ -1,7 +1,7 @@
 # backend/nft_logic/base.py
 
 from abc import ABC, abstractmethod
-
+import time
 class NFTLogicHandler(ABC):
     """
     所有 NFT 逻辑插件的抽象基类。
@@ -9,14 +9,15 @@ class NFTLogicHandler(ABC):
     """
 
     @abstractmethod
-    def mint(self, owner_key: str, data: dict) -> (bool, str, dict):
-        """
-        处理铸造新 NFT 的逻辑。
-        :param owner_key: 新 NFT 的所有者公钥。
-        :param data: 来自管理员或用户的初始数据。
-        :return: (是否成功, 消息, 存储到数据库的 data 字典)。
-        """
-        pass
+    def mint(self, owner_key: str, data: dict, owner_username: str = None) -> (bool, str, dict):
+         """
+         处理铸造新 NFT 的逻辑。
+         :param owner_key: 新 NFT 的所有者公钥。
+         :param data: 来自管理员或用户的初始数据。
+         :param owner_username: (可选) 新 NFT 的所有者用户名。
+         :return: (是否成功, 消息, 存储到数据库的 data 字典)。
+         """
+         pass
 
     @abstractmethod
     def validate_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str):
@@ -28,7 +29,12 @@ class NFTLogicHandler(ABC):
         :param requester_key: 发起请求的用户的公钥。
         :return: (是否合法, 消息)。
         """
-        pass
+        if action == 'destroy':
+            if nft.get('owner_key') != requester_key:
+                return False, "只有所有者才能销毁此物品"
+            return True, "可以销毁"
+
+        return False, f"不支持的动作: {action}"
 
     @abstractmethod
     def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str, dict):
@@ -40,7 +46,15 @@ class NFTLogicHandler(ABC):
         :param requester_key: 发起请求的用户的公钥。
         :return: (是否成功, 消息, 更新后的 data 字典)。
         """
-        pass
+        # --- 新增：通用销毁操作执行 ---
+        if action == 'destroy':
+            updated_data = nft.get('data', {}).copy()
+            # 特殊协议：告诉数据库将此 NFT 状态改为 'DESTROYED'
+            updated_data['__new_status__'] = 'DESTROYED'
+            # (可选) 清理数据
+            updated_data['destroyed_at'] = time.time()
+            return True, "物品已成功销毁", updated_data
+        return False, "内部错误：执行了未验证的动作", {}
     
     # <<< 商店配置接口 >>>
     @classmethod
@@ -53,6 +67,8 @@ class NFTLogicHandler(ABC):
             "creatable": True,
             "cost": 10.0, # 创建所需FC
             "name": "秘密愿望",
+            "action_type": "create", # 新增：动作类型, create 是默认值
+            "action_label": "支付并铸造", # 新增：按钮标签
             "description": "支付FC来封存一个秘密，它将在指定时间后消失。",
             "fields": [
                 {"name": "description", "label": "公开描述", "type": "textarea", "required": True},
@@ -63,6 +79,19 @@ class NFTLogicHandler(ABC):
         """
         return {"creatable": False}
     
+    @classmethod
+    def execute_shop_action(cls, owner_key: str, owner_username: str, data: dict, conn) -> (bool, str, str):
+        """
+        (类方法, 可选实现) 处理一个更复杂的商店动作，比如概率性铸造。
+        只有当 get_shop_config() 中 action_type != 'create' 时才会被调用。
+        :param owner_key: 发起动作的用户公钥。
+        :param owner_username: 发起动作的用户名。
+        :param data: 来自前端的表单数据。
+        :param conn: 数据库连接对象 (用于事务处理)。
+        :return: (是否成功, 消息, 新铸造的 NFT ID 或 None)。
+        """
+        # 默认情况下，不支持非创建类型的动作
+        return False, "该物品类型不支持此商店动作", None
     # <<< --- “可交易性”检查接口 --- >>>
     def is_tradable(self, nft: dict) -> (bool, str):
         """

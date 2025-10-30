@@ -10,7 +10,7 @@ class SecretWishHandler(NFTLogicHandler):
     “秘密愿望” NFT 的逻辑处理器。
     """
 
-    def mint(self, owner_key: str, data: dict) -> (bool, str, dict):
+    def mint(self, owner_key: str, data: dict, owner_username: str = None) -> (bool, str, dict):
         """
         铸造一个新的“秘密愿望”。
         """
@@ -37,9 +37,11 @@ class SecretWishHandler(NFTLogicHandler):
             "destroy_timestamp": destroy_timestamp,
             "description": description,
             "content": content,
-            "is_destroyed": False
+            "is_destroyed": False,
+            "creator_key": owner_key,
+            "creator_username": owner_username or "未知"
         }
-        return True, "一个新的愿望已被悄然封存。", db_data
+        return True, "一个新的秘密已被悄然封存。", db_data
 
     def validate_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str):
         """
@@ -49,10 +51,11 @@ class SecretWishHandler(NFTLogicHandler):
             destroy_ts = nft.get('data', {}).get('destroy_timestamp', 0)
             if time.time() > destroy_ts:
                 return True, "可以销毁"
-            else:
-                return False, "时间未到，无法销毁"
+          # 如果时间未到，则交给基类处理通用的所有者销毁逻辑
+
+        # 调用基类的方法来处理通用的 'destroy' 动作或其他未来可能添加的通用动作
+        return super().validate_action(nft, action, action_data, requester_key)
         
-        return False, "“秘密愿望”不支持其他主动操作。"
 
     def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str, dict):
         """
@@ -68,7 +71,7 @@ class SecretWishHandler(NFTLogicHandler):
             
             return True, "这个愿望已经彻底消失了。", updated_data
 
-        return False, "内部错误：不应执行任何操作", {}
+        return super().perform_action(nft, action, action_data, requester_key)
     
     @classmethod
     def get_shop_config(cls) -> dict:
@@ -128,6 +131,7 @@ class SecretWishHandler(NFTLogicHandler):
         try:
             data = nft.get('data', {})
             description = data.get('description', '一个秘密')
+            creator_name = data.get('creator_username', '未知用户')
             destroy_ts = data.get('destroy_timestamp', 0)
             
             time_left_seconds = max(0, int(destroy_ts - time.time()))
@@ -142,7 +146,7 @@ class SecretWishHandler(NFTLogicHandler):
                 minutes, _ = divmod(remainder, 60)
                 countdown_str = f"约 {hours} 小时 {minutes} 分钟"
             
-            return f"“{description}” - 这个秘密还剩下 {countdown_str} 就会消失。"
+            return f"“{description}” (来自 {creator_name}) - 这个秘密还剩下 {countdown_str} 就会消失。"
         except Exception as e:
             # 如果出现任何错误，返回一个安全的默认值
-            return data.get('description', "一个神秘的愿望")
+            return f"{data.get('description', '一个神秘的愿望')} (来自 {data.get('creator_username', '未知')})"

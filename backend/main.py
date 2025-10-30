@@ -190,6 +190,13 @@ class ShopCreateNftRequest(BaseModel):
     cost: float
     data: dict
 
+class ShopActionRequest(BaseModel):
+    owner_key: str
+    timestamp: float
+    nft_type: str
+    cost: float
+    data: dict
+
 # --- 管理员认证 ---
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
 GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
@@ -571,7 +578,13 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"支付失败: {detail}")
         
-        success, detail, db_data = handler.mint(message.owner_key, message.data)
+        user_details = ledger.get_user_details(message.owner_key, conn) # 在事务中查询
+        if not user_details:
+             # 理论上不会发生，因为能支付成功说明用户存在
+            conn.rollback()
+            raise HTTPException(status_code=404, detail="无法找到铸造者信息")
+
+        success, detail, db_data = handler.mint(message.owner_key, message.data, owner_username=user_details.get('username'))
         if not success:
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"铸造逻辑失败: {detail}")
@@ -585,6 +598,44 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
 
     return SuccessResponse(detail=f"铸造成功！你获得了新的 {config.get('name', 'NFT')}!")
     
+@app.post("/market/shop_action", response_model=SuccessResponse, tags=["Market"])
+def api_perform_shop_action(request: MarketSignedRequest):
+    message = get_verified_message(request, ShopActionRequest)
+
+    handler = get_handler(message.nft_type)
+    if not handler:
+        raise HTTPException(status_code=400, detail="无效的NFT类型")
+
+    config = handler.get_shop_config()
+    if not config.get("creatable") or config.get("cost") != message.cost:
+        raise HTTPException(status_code=400, detail="商店配置不匹配或该物品不可用")
+
+    with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
+        # 1. 扣款
+        success, detail = ledger._create_system_transaction(
+            message.owner_key,
+            ledger.BURN_ACCOUNT,
+            message.cost,
+            f"执行商店动作: {config.get('name', message.nft_type)}",
+            conn
+        )
+        if not success:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"支付失败: {detail}")
+
+        # 2. 执行插件定义的动作
+        user_details = ledger.get_user_details(message.owner_key, conn)
+        username = user_details.get('username') if user_details else "未知用户"
+
+        success, detail, new_nft_id = handler.execute_shop_action(message.owner_key, username, message.data, conn)
+
+        if not success:
+            conn.rollback() # 很重要，如果动作失败（比如没抽中），也要回滚支付
+            raise HTTPException(status_code=400, detail=detail)
+
+        conn.commit()
+        return SuccessResponse(detail=detail)
+
 # --- 管理员接口 ---
 @app.get("/admin/nft/types", response_model=List[str], tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
 def api_admin_get_nft_types():
@@ -596,7 +647,13 @@ def api_admin_mint_nft(request: AdminMintNFTRequest):
     if not handler:
         raise HTTPException(status_code=400, detail=f"不存在的 NFT 类型: {request.nft_type}")
 
-    success, detail, db_data = handler.mint(request.to_key, request.data)
+    # 获取用户名以传递给 mint 函数
+    user_details = ledger.get_user_details(request.to_key)
+    if not user_details:
+        raise HTTPException(status_code=404, detail="接收用户不存在")
+    username = user_details.get('username')
+
+    success, detail, db_data = handler.mint(request.to_key, request.data, owner_username=username)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
 
@@ -616,6 +673,17 @@ def api_admin_issue(request: AdminIssueRequest):
     success, detail = ledger.admin_issue_coins(
         to_key=request.to_key,
         amount=request.amount,
+        note=request.note
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+@app.post("/admin/multi_issue", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_multi_issue(request: AdminMultiIssueRequest):
+    """(管理员) 批量增发货币。"""
+    success, detail = ledger.admin_multi_issue_coins(
+        targets=request.targets,
         note=request.note
     )
     if not success:

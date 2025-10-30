@@ -694,20 +694,20 @@ def get_balance(public_key: str) -> float:
         result = cursor.fetchone()
         return result['balance'] if result else 0.0
 
-def get_user_details(public_key: str) -> dict:
+def get_user_details(public_key: str, conn=None) -> dict:
     """获取用户的详细信息。"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
+    def run_logic(connection):
+        cursor = connection.cursor()
         cursor.execute(
             """
-            SELECT 
-                u.public_key, 
-                u.username, 
-                CAST(strftime('%s', u.created_at) AS REAL) as created_at, 
-                u.invitation_quota, 
+            SELECT
+                u.public_key,
+                u.username,
+                CAST(strftime('%s', u.created_at) AS REAL) as created_at,
+                u.invitation_quota,
                 u.invited_by,
                 u.is_active,
-                CASE 
+                CASE
                     WHEN u.invited_by = 'GENESIS' THEN '--- 系统 ---'
                     ELSE (SELECT inviter.username FROM users inviter WHERE inviter.public_key = u.invited_by)
                 END as inviter_username
@@ -719,16 +719,24 @@ def get_user_details(public_key: str) -> dict:
         user_details = cursor.fetchone()
         if not user_details:
             return None
-        
+
         user_dict = dict(user_details)
         user_dict['is_active'] = bool(user_dict['is_active'])
-        
+
         cursor.execute(
             "SELECT COUNT(*) as tx_count FROM transactions WHERE from_key = ? OR to_key = ?",
             (public_key, public_key)
         )
         user_dict['tx_count'] = cursor.fetchone()['tx_count']
         return user_dict
+
+    if conn:
+        # 如果提供了数据库连接，就直接使用它
+        return run_logic(conn)
+    else:
+        # 否则，像往常一样创建新连接
+        with get_db_connection() as new_conn:
+            return run_logic(new_conn)
 
 def get_all_active_users() -> list:
     """获取所有活跃用户列表。"""
@@ -900,6 +908,34 @@ def admin_issue_coins(to_key: str, amount: float, note: str = None) -> (bool, st
     """(管理员功能) 增发货币。"""
     if amount <= 0: return False, "发行金额必须大于0"
     return _create_system_transaction(GENESIS_ACCOUNT, to_key, amount, note or "管理员增发")
+
+def admin_multi_issue_coins(targets: list, note: str = None) -> (bool, str):
+    """(管理员功能) 批量增发货币。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            valid_targets = [t for t in targets if t.get('key') and isinstance(t.get('amount'), (int, float)) and t.get('amount') > 0]
+            if not valid_targets:
+                return False, "提供的目标用户列表无效或为空"
+
+            for target in valid_targets:
+                to_key = target.get('key')
+                amount = target.get('amount')
+                
+                success, detail = _execute_system_tx_logic(
+                    from_key=GENESIS_ACCOUNT, 
+                    to_key=to_key, 
+                    amount=amount, 
+                    note=note or "管理员批量增发", 
+                    conn=conn
+                )
+                if not success:
+                    conn.rollback()
+                    return False, f"为用户 {to_key[:10]}... 发行失败: {detail}"
+            conn.commit()
+            return True, f"成功为 {len(valid_targets)} 个用户批量发行货币。"
+        except Exception as e:
+            conn.rollback()
+            return False, f"批量发行时发生数据库错误: {e}"
 
 def admin_burn_coins(from_key: str, amount: float, note: str = None) -> (bool, str):
     """(管理员功能) 销毁货币。"""
