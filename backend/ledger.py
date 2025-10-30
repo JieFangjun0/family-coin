@@ -4,8 +4,11 @@ import uuid
 import threading
 import json
 import os
+import random
+import string
 from contextlib import contextmanager
-from shared.crypto_utils import verify_signature
+from werkzeug.security import generate_password_hash, check_password_hash
+from shared.crypto_utils import verify_signature, generate_key_pair
 from backend.nft_logic import get_handler
 DATABASE_PATH = '/app/data/ledger.db'
 LEDGER_LOCK = threading.Lock()
@@ -17,6 +20,9 @@ ESCROW_ACCOUNT = "JFJ_ESCROW"
 
 DEFAULT_INVITATION_QUOTA = 3
 
+def _generate_uid(length=8):
+    """生成一个指定长度的纯数字UID。"""
+    return ''.join(random.choices(string.digits, k=length))
 @contextmanager
 def get_db_connection():
     """获取数据库连接的上下文管理器。"""
@@ -38,16 +44,31 @@ def init_db():
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # --- 用户表 (不变) ---
+        # --- 用户表 (核心修改) ---
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             public_key TEXT PRIMARY KEY,
+            uid TEXT NOT NULL UNIQUE,
             username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_active BOOLEAN DEFAULT 1,
             invited_by TEXT,
             invitation_quota INTEGER DEFAULT 0,
-            private_key_pem TEXT
+            private_key_pem TEXT,
+            profile_signature TEXT
+        )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_uid ON users (uid)")
+        
+        # --- 新增：用户个人主页表 ---
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            public_key TEXT PRIMARY KEY,
+            signature TEXT,
+            displayed_nfts TEXT,
+            updated_at TIMESTAMP,
+            FOREIGN KEY (public_key) REFERENCES users (public_key)
         )
         ''')
         
@@ -663,6 +684,28 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
                 return False, "邀请码已过期"
                 
             inviter_key = code_data['generated_by']
+            # --- 新增逻辑 ---
+            private_key, public_key = generate_key_pair()
+            password_hash = generate_password_hash(password)
+            
+            while True:
+                uid = _generate_uid()
+                cursor.execute("SELECT 1 FROM users WHERE uid = ?", (uid,))
+                if not cursor.fetchone():
+                    break
+            
+            default_quota_str = get_setting('default_invitation_quota')
+            default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
+            
+            cursor.execute(
+                "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (public_key, uid, username, password_hash, inviter_key, default_quota, private_key)
+            )
+            
+            # 初始化空的个人资料
+            cursor.execute("INSERT INTO user_profiles (public_key) VALUES (?)", (public_key,))
+
+            cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
             
             default_quota_str = get_setting('default_invitation_quota')
             default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
@@ -723,15 +766,116 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
             )
             
             conn.commit()
-            return True, f"注册成功！"
+            # 返回新用户信息，但不包括私钥
+            return True, "注册成功！", {"uid": uid, "username": username, "public_key": public_key}
             
         except sqlite3.IntegrityError:
             conn.rollback()
-            return False, "用户名或公钥已存在"
+            return False, "用户名已存在", {}
         except Exception as e:
             conn.rollback()
-            return False, f"注册时发生未知错误: {e}"
+            return False, f"注册时发生未知错误: {e}", {}
 
+def authenticate_user(username_or_uid: str, password: str) -> (bool, str, dict):
+    """(新增) 使用用户名/UID和密码进行身份验证。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT public_key, username, uid, password_hash, private_key_pem, is_active FROM users WHERE username = ? OR uid = ?",
+            (username_or_uid, username_or_uid)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            return False, "用户不存在", {}
+        
+        user_dict = dict(user)
+
+        if not user_dict['is_active']:
+            return False, "该账户已被禁用", {}
+
+        if not check_password_hash(user_dict['password_hash'], password):
+            return False, "密码错误", {}
+            
+        # 验证成功，返回包含密钥和UID的用户信息
+        return True, "登录成功", {
+            "public_key": user_dict['public_key'],
+            "private_key": user_dict['private_key_pem'],
+            "username": user_dict['username'],
+            "uid": user_dict['uid']
+        }
+
+
+def get_user_profile(uid_or_username: str) -> dict:
+    """(新增) 获取用户的公开个人主页信息。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 查找用户基本信息
+        cursor.execute(
+            """
+            SELECT u.uid, u.username, u.public_key, CAST(strftime('%s', u.created_at) AS REAL) as created_at,
+                   p.signature, p.displayed_nfts
+            FROM users u
+            LEFT JOIN user_profiles p ON u.public_key = p.public_key
+            WHERE u.uid = ? OR u.username = ?
+            """,
+            (uid_or_username, uid_or_username)
+        )
+        user_profile = cursor.fetchone()
+
+        if not user_profile:
+            return None
+            
+        profile_dict = dict(user_profile)
+        
+        # 解析并获取展示的NFTs的详细信息
+        displayed_nfts_ids = json.loads(profile_dict.get('displayed_nfts') or '[]')
+        nfts_details = []
+        if displayed_nfts_ids:
+            # 使用 parameter substitution to prevent SQL injection
+            placeholders = ','.join('?' for _ in displayed_nfts_ids)
+            query = f"""
+                SELECT nft_id, owner_key, nft_type, data, status
+                FROM nfts WHERE nft_id IN ({placeholders}) AND owner_key = ? AND status = 'ACTIVE'
+            """
+            cursor.execute(query, displayed_nfts_ids + [profile_dict['public_key']])
+            for row in cursor.fetchall():
+                nft_dict = dict(row)
+                nft_dict['data'] = json.loads(nft_dict['data'])
+                nfts_details.append(nft_dict)
+        
+        profile_dict['displayed_nfts_details'] = nfts_details
+        return profile_dict
+
+
+def update_user_profile(public_key: str, signature: str, displayed_nfts: list) -> (bool, str):
+    """(新增) 更新用户的个人主页信息。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            
+            # 验证 NFT 是否都属于该用户
+            if displayed_nfts:
+                placeholders = ','.join('?' for _ in displayed_nfts)
+                query = f"SELECT COUNT(*) FROM nfts WHERE nft_id IN ({placeholders}) AND owner_key = ?"
+                cursor.execute(query, displayed_nfts + [public_key])
+                count = cursor.fetchone()[0]
+                if count != len(displayed_nfts):
+                    return False, "一个或多个所选的NFT不属于你或不存在"
+
+            displayed_nfts_json = json.dumps(displayed_nfts)
+            
+            cursor.execute(
+                "INSERT OR REPLACE INTO user_profiles (public_key, signature, displayed_nfts, updated_at) VALUES (?, ?, ?, ?)",
+                (public_key, signature, displayed_nfts_json, time.time())
+            )
+            
+            conn.commit()
+            return True, "个人主页更新成功"
+        except Exception as e:
+            conn.rollback()
+            return False, f"更新个人主页失败: {e}"
 def get_balance(public_key: str) -> float:
     """查询指定公钥的余额。"""
     with get_db_connection() as conn:
@@ -748,6 +892,7 @@ def get_user_details(public_key: str, conn=None) -> dict:
             """
             SELECT
                 u.public_key,
+                u.uid,
                 u.username,
                 CAST(strftime('%s', u.created_at) AS REAL) as created_at,
                 u.invitation_quota,
@@ -1123,33 +1268,50 @@ def count_users() -> int:
         result = cursor.fetchone()
         return result[0] if result else 0
 
-def create_genesis_user(username: str, public_key: str, private_key: str) -> (bool, str):
+def create_genesis_user(username: str, password: str) -> (bool, str, dict):
     """创建第一个（创世）管理员用户。"""
     if count_users() > 0:
-        return False, "系统已经初始化，无法创建创世用户。"
+        return False, "系统已经初始化，无法创建创世用户。", {}
 
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
+            
+            private_key, public_key = generate_key_pair()
+            password_hash = generate_password_hash(password)
+            uid = "000"
             inv_quota = 999999
 
             cursor.execute(
-                "INSERT INTO users (public_key, username, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?)",
-                (public_key, username, "GENESIS", inv_quota, private_key)
+                "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (public_key, uid, username, password_hash, "GENESIS", inv_quota, private_key)
             )
+
+            # 初始化空的个人资料
+            cursor.execute("INSERT INTO user_profiles (public_key) VALUES (?)", (public_key,))
 
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
 
             conn.commit()
-            return True, "创世管理员创建成功！"
+            return True, "创世管理员创建成功！", {"uid": uid, "username": username, "public_key": public_key, "private_key": private_key}
         except Exception as e:
             conn.rollback()
-            return False, f"创建创世用户失败: {e}"
+            return False, f"创建创世用户失败: {e}", {}
 
-def admin_get_user_private_key(public_key: str) -> str:
-    """(管理员功能) 获取用户的私钥。"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT private_key_pem FROM users WHERE public_key = ?", (public_key,))
-        result = cursor.fetchone()
-        return result['private_key_pem'] if result and result['private_key_pem'] else None
+def admin_reset_user_password(public_key: str, new_password: str) -> (bool, str):
+    """(新增, 管理员功能) 重置用户的密码。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            new_password_hash = generate_password_hash(new_password)
+            cursor.execute(
+                "UPDATE users SET password_hash = ? WHERE public_key = ?",
+                (new_password_hash, public_key)
+            )
+            if cursor.rowcount == 0:
+                return False, "未找到用户"
+            conn.commit()
+            return True, f"成功重置用户 {public_key[:10]}... 的密码"
+        except Exception as e:
+            conn.rollback()
+            return False, f"重置密码失败: {e}"

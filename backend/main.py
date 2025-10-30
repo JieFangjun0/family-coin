@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 import uvicorn
 import os
+from werkzeug.security import generate_password_hash
 
 from shared.crypto_utils import (
     generate_key_pair, 
@@ -18,12 +19,25 @@ from backend.nft_logic import get_handler, get_available_nft_types, NFT_HANDLERS
 # --- Pydantic 模型定义 ---
 class UserRegisterRequest(BaseModel):
     username: str
+    password: str  # <--- 修改
     invitation_code: str
 
 class UserRegisterResponse(BaseModel):
+    uid: str # <--- 新增
     username: str
     public_key: str
-    private_key: str
+    # private_key 字段被移除，不再在注册时返回
+
+class UserLoginRequest(BaseModel): # <--- 新增
+    username_or_uid: str
+    password: str
+
+class UserLoginResponse(BaseModel): # <--- 新增
+    message: str
+    public_key: str
+    private_key: str # 只在登录成功时返回给用户
+    username: str
+    uid: str
 
 class TransactionMessage(BaseModel):
     from_key: str
@@ -56,6 +70,7 @@ class UserDetailsResponse(BaseModel):
 class UserInfo(BaseModel):
     username: str
     public_key: str
+    uid: str  # <--- BUG 修正：添加 uid 字段
 
 class UserListResponse(BaseModel):
     users: List[UserInfo]
@@ -128,9 +143,9 @@ class AdminSetUserActiveStatusRequest(BaseModel):
 class AdminBalancesResponse(BaseModel):
     balances: List[dict]
 
-class AdminPrivateKeyResponse(BaseModel):
+class AdminResetPasswordRequest(BaseModel): # 新增
     public_key: str
-    private_key: str
+    new_password: str
     
 class InvitationCodeResponse(BaseModel):
     code: str
@@ -144,7 +159,28 @@ class MessageGenerateCode(BaseModel):
 
 class GenesisRegisterRequest(BaseModel):
     username: str
+    password: str # <--- 修改
     genesis_password: str
+
+class GenesisRegisterResponse(BaseModel): # <--- 新增
+    uid: str
+    username: str
+    public_key: str
+    private_key: str
+    
+class UserProfileResponse(BaseModel): # <--- 新增
+    uid: str
+    username: str
+    public_key: str
+    created_at: float
+    signature: Optional[str] = None
+    displayed_nfts_details: List[dict] = []
+
+class ProfileUpdateRequest(BaseModel): # <--- 新增
+    owner_key: str # 用于验证
+    timestamp: float
+    signature: Optional[str] = None
+    displayed_nfts: Optional[List[str]] = None
 
 class MarketSignedRequest(BaseModel):
     message_json: str
@@ -224,34 +260,29 @@ def api_get_system_status():
     user_count = ledger.count_users()
     return {"needs_setup": user_count == 0}
 
-@app.post("/genesis_register", response_model=UserRegisterResponse, tags=["System"])
+@app.post("/genesis_register", response_model=GenesisRegisterResponse, tags=["System"])
 def api_genesis_register(request: GenesisRegisterRequest):
     if ledger.count_users() > 0:
         raise HTTPException(status_code=403, detail="系统已经初始化，无法注册创世用户。")
 
     if request.genesis_password != GENESIS_PASSWORD:
-        raise HTTPException(status_code=403, detail="创世密码错误。")
+        raise HTTPException(status_code=403, detail="创世密钥错误。")
         
     if not request.username or len(request.username) < 3:
         raise HTTPException(status_code=400, detail="用户名至少需要3个字符")
     
-    private_key, public_key = generate_key_pair()
-    
-    success, detail = ledger.create_genesis_user(
+    if not request.password or len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="用户密码至少需要6个字符")
+
+    success, detail, user_data = ledger.create_genesis_user(
         username=request.username, 
-        public_key=public_key,
-        private_key=private_key
+        password=request.password
     )
 
     if not success:
         raise HTTPException(status_code=500, detail=detail)
 
-    return UserRegisterResponse(
-        username=request.username,
-        public_key=public_key,
-        private_key=private_key
-    )
-
+    return GenesisRegisterResponse(**user_data)
 # --- 辅助函数：验证签名 ---
 def get_verified_message(request: MarketSignedRequest, model: BaseModel):
     try:
@@ -290,32 +321,67 @@ def get_verified_nft_action_message(request: NFTActionRequest, model: BaseModel)
     return message
 
 # --- 公共接口 ---
+@app.post("/login", response_model=UserLoginResponse, tags=["User"])
+def api_login(request: UserLoginRequest):
+    """(新增) 用户通过用户名/UID和密码登录。"""
+    if not request.username_or_uid or not request.password:
+        raise HTTPException(status_code=400, detail="用户名/UID和密码不能为空")
+
+    success, detail, user_data = ledger.authenticate_user(
+        request.username_or_uid, request.password
+    )
+
+    if not success:
+        raise HTTPException(status_code=401, detail=detail)
+
+    return UserLoginResponse(message=detail, **user_data)
+
+
 @app.post("/register", response_model=UserRegisterResponse, tags=["User"])
 def api_register_user(request: UserRegisterRequest):
     if not request.username or len(request.username) < 3:
         raise HTTPException(status_code=400, detail="用户名至少需要3个字符")
+    
+    if not request.password or len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少需要6个字符")
         
     if not request.invitation_code:
         raise HTTPException(status_code=400, detail="必须提供邀请码")
         
-    private_key, public_key = generate_key_pair()
-    
-    success, detail = ledger.register_user(
+    success, detail, new_user_info = ledger.register_user(
         username=request.username, 
-        public_key=public_key,
-        private_key=private_key,
+        password=request.password,
         invitation_code=request.invitation_code.upper()
     )
     
     if not success:
         raise HTTPException(status_code=409, detail=detail)
         
-    return UserRegisterResponse(
-        username=request.username,
-        public_key=public_key,
-        private_key=private_key
-    )
+    return UserRegisterResponse(**new_user_info)
 
+@app.get("/profile/{uid_or_username}", response_model=UserProfileResponse, tags=["User"])
+def api_get_user_profile(uid_or_username: str):
+    """(新增) 获取用户的公开个人主页。"""
+    profile_data = ledger.get_user_profile(uid_or_username)
+    if not profile_data:
+        raise HTTPException(status_code=404, detail="未找到该用户")
+    return UserProfileResponse(**profile_data)
+
+@app.post("/profile/update", response_model=SuccessResponse, tags=["User"])
+def api_update_user_profile(request: MarketSignedRequest):
+    """(新增) 用户更新自己的个人主页。"""
+    message = get_verified_message(request, ProfileUpdateRequest)
+    
+    success, detail = ledger.update_user_profile(
+        public_key=message.owner_key,
+        signature=message.signature,
+        displayed_nfts=message.displayed_nfts
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    
+    return SuccessResponse(detail=detail)
 @app.post("/transaction", response_model=SuccessResponse, tags=["User"])
 def api_create_transaction(request: TransactionRequest):
     try:
@@ -358,6 +424,8 @@ def api_get_user_details(public_key: str):
 @app.get("/users/list", response_model=UserListResponse, tags=["User"])
 def api_get_all_users():
     users = ledger.get_all_active_users()
+    # UserInfo Pydantic model might need 'uid' field if you want to return it here.
+    # For now, assuming it's not strictly needed in the general user list.
     return UserListResponse(users=users)
 
 @app.post("/user/generate_invitation", response_model=InvitationCodeResponse, tags=["User"])
@@ -738,13 +806,16 @@ def api_admin_adjust_user_quota(request: AdminAdjustUserQuotaRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@app.get("/admin/private_key/", response_model=AdminPrivateKeyResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
-def api_admin_get_private_key(public_key: str):
-    """(管理员) 获取指定用户的私钥。"""
-    private_key = ledger.admin_get_user_private_key(public_key)
-    if not private_key:
-        raise HTTPException(status_code=404, detail="未找到用户或该用户没有存储私钥。")
-    return AdminPrivateKeyResponse(public_key=public_key, private_key=private_key)
+@app.post("/admin/reset_password", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_reset_user_password(request: AdminResetPasswordRequest):
+    """(新增, 管理员功能) 强制重置用户的密码。"""
+    if not request.new_password or len(request.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少需要6个字符。")
+        
+    success, detail = ledger.admin_reset_user_password(request.public_key, request.new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
 
 @app.post("/admin/nuke_system", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_nuke_system():

@@ -42,6 +42,7 @@ def init_session_state():
         'private_key': "",
         'public_key': "",
         'username': "",
+        'uid': "", # <--- 新增
         'admin_secret': "",
         'admin_ui_unlocked': False,
         'user_details': None,
@@ -50,6 +51,7 @@ def init_session_state():
         'needs_setup': None,
         'new_user_info': None,
         'genesis_info': None,
+        'viewing_profile_of': None # <--- 新增, 用于社区页面
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -172,28 +174,38 @@ def create_signed_message(message_dict):
         "signature": signature
     }
 
-# --- 创世用户设置 ---
+                            
+# --- 登录和注册视图 ---
 def show_genesis_setup():
     """显示首次运行时的创世用户注册界面。"""
     st.header("🚀 欢迎使用 FamilyCoin - 首次系统设置")
 
     if st.session_state.genesis_info:
         data = st.session_state.genesis_info
-        st.success(f"🎉 创世用户 '{data['username']}' 创建成功！")
-        st.warning("**请立即复制并安全备份你的私钥！** 这是你唯一一次看到它。丢失后无法找回。")
+        st.success(f"🎉 创世管理员 '{data['username']}' (UID: {data['uid']}) 创建成功！")
         
-        st.text_area("你的公钥 (你的“地址”)", data['public_key'], height=150)
-        st.text_area("!! 你的私钥 (你的“密码”) !!", data['private_key'], height=300)
+        # --- (核心修改：调整措辞，强调特殊性) ---
+        st.error(
+            "**⚠️ 关键步骤：备份管理员私钥**\n\n"
+            "作为系统的第一个用户（管理员），你的所有特权操作都将由这个专属私钥签名。"
+            "**这是你唯一一次看到它，请务必将其复制并保存在安全的地方（如密码管理器中）！**"
+            "普通用户不会进行此操作。"
+        )
         
-        st_copy_to_clipboard_button(data['private_key'], "点此复制私钥", "genesis_pk")
+        st.text_area("管理员公钥", data['public_key'], height=150)
+        st.text_area("‼️ 管理员私钥 (最高权限) ‼️", data['private_key'], height=300)
         
-        st.info("复制私钥后，请点击下方按钮进入登录界面。")
+        st_copy_to_clipboard_button(data['private_key'], "点此复制管理员私钥", "genesis_pk")
+        
+        st.info("备份私钥后，你未来将使用刚才设置的 **用户名和密码** 登录。")
 
-        if st.button("我已保存私钥，进入登录页面", type="primary"):
+        if st.button("我已安全备份私钥，进入登录页面", type="primary"):
+            # 清理会话状态，准备登录
             st.session_state.genesis_info = None
             st.session_state.needs_setup = False
             st.rerun()
     else:
+        # ... (表单部分代码不变) ...
         st.info(
             "系统检测到数据库为空，需要创建第一个管理员（创世）用户。\n\n"
             "这个用户将拥有超高的邀请额度，用于邀请第一批成员。"
@@ -202,22 +214,26 @@ def show_genesis_setup():
         with st.form("genesis_form"):
             st.subheader("创建创世用户")
             username = st.text_input("输入创世用户的用户名", "admin")
+            password = st.text_input("设置创世用户的登录密码", type="password")
             
             genesis_password = st.text_input(
-                "输入创世密码", 
+                "输入创世密钥",
                 type="password",
-                help="这是在代码中预设的，用于验证首次操作的密码。"
+                help="这是在 docker-compose.yml 中预设的，用于验证首次操作的密码。"
             )
             
             submitted = st.form_submit_button("创建并初始化系统", type="primary")
 
             if submitted:
-                if not username or not genesis_password:
-                    st.error("用户名和创世密码不能为空。")
+                if not username or not genesis_password or not password:
+                    st.error("所有字段均不能为空。")
+                elif len(password) < 6:
+                    st.error("登录密码至少需要6个字符。")
                 else:
                     with st.spinner("正在创建创世用户..."):
                         payload = {
                             "username": username,
+                            "password": password,
                             "genesis_password": genesis_password
                         }
                         data, error = api_call('POST', '/genesis_register', payload=payload)
@@ -227,87 +243,155 @@ def show_genesis_setup():
                         else:
                             st.session_state.genesis_info = data
                             st.rerun()
-                            
-# --- 登录和注册视图 ---
+# jiefangjun0/family-coin/family-coin-6dc61cd34e5cf7dc15f5e541ca075beebc57db7f/frontend/app.py
+
+# ... (其他代码不变) ...
+
+# --- 创世用户设置 ---
+def show_genesis_setup():
+    """显示首次运行时的创世用户注册界面。"""
+    st.header("🚀 欢迎使用 FamilyCoin - 首次系统设置")
+
+    if st.session_state.genesis_info:
+        data = st.session_state.genesis_info
+        st.success(f"🎉 创世管理员 '{data['username']}' (UID: {data['uid']}) 创建成功！")
+        
+        # --- (核心修改：调整措辞，强调特殊性) ---
+        st.error(
+            "**⚠️ 关键步骤：备份管理员私钥**\n\n"
+            "作为系统的第一个用户（管理员），你的所有特权操作都将由这个专属私钥签名。"
+            "**这是你唯一一次看到它，请务必将其复制并保存在安全的地方（如密码管理器中）！**"
+            "普通用户不会进行此操作。"
+        )
+        
+        st.text_area("管理员公钥", data['public_key'], height=150)
+        st.text_area("‼️ 管理员私钥 (最高权限) ‼️", data['private_key'], height=300)
+        
+        st_copy_to_clipboard_button(data['private_key'], "点此复制管理员私钥", "genesis_pk")
+        
+        st.info("备份私钥后，你未来将使用刚才设置的 **用户名和密码** 登录。")
+
+        if st.button("我已安全备份私钥，进入登录页面", type="primary"):
+            # 清理会话状态，准备登录
+            st.session_state.genesis_info = None
+            st.session_state.needs_setup = False
+            st.rerun()
+    else:
+        # ... (表单部分代码不变) ...
+        st.info(
+            "系统检测到数据库为空，需要创建第一个管理员（创世）用户。\n\n"
+            "这个用户将拥有超高的邀请额度，用于邀请第一批成员。"
+        )
+
+        with st.form("genesis_form"):
+            st.subheader("创建创世用户")
+            username = st.text_input("输入创世用户的用户名", "admin")
+            password = st.text_input("设置创世用户的登录密码", type="password")
+            
+            genesis_password = st.text_input(
+                "输入创世密钥",
+                type="password",
+                help="这是在 docker-compose.yml 中预设的，用于验证首次操作的密码。"
+            )
+            
+            submitted = st.form_submit_button("创建并初始化系统", type="primary")
+
+            if submitted:
+                if not username or not genesis_password or not password:
+                    st.error("所有字段均不能为空。")
+                elif len(password) < 6:
+                    st.error("登录密码至少需要6个字符。")
+                else:
+                    with st.spinner("正在创建创世用户..."):
+                        payload = {
+                            "username": username,
+                            "password": password,
+                            "genesis_password": genesis_password
+                        }
+                        data, error = api_call('POST', '/genesis_register', payload=payload)
+                        
+                        if error:
+                            st.error(f"创世用户创建失败: {error}")
+                        else:
+                            st.session_state.genesis_info = data
+                            st.rerun()
+
+
+# --- 登录和注册视图 (修正注册成功后的界面) ---
 def show_login_register():
     st.header("欢迎！")
     
     login_tab, register_tab = st.tabs(["登录", "注册新账户 (需要邀请码)"])
 
+    # ... (登录表单部分代码不变) ...
     with login_tab:
-        st.subheader("使用私钥登录")
-        st.info(" FamilyCoin 不存储你的私钥。请在下方粘贴你的私钥以登录。")
-        
-        private_key_input = st.text_area("在此处粘贴你的私钥 (PEM 格式)", height=250, key="login_pk_area")
-        
-        if st.button("登录", type="primary"):
-            if not private_key_input:
-                st.error("请输入私钥。")
-            else:
-                public_key = get_public_key_from_private(private_key_input)
-                if not public_key:
-                    st.error("私钥格式无效。请输入 PKCS8 PEM 格式的私钥。")
+        st.subheader("使用账户密码登录")
+        with st.form("login_form"):
+            username_or_uid = st.text_input("用户名或UID")
+            password = st.text_input("密码", type="password")
+            submitted = st.form_submit_button("登录", type="primary")
+
+            if submitted:
+                if not username_or_uid or not password:
+                    st.error("请输入用户名/UID和密码。")
                 else:
-                    data, error = api_call('GET', "/user/details/", params={"public_key": public_key})
-                    if error:
-                        st.error(f"登录失败: {error}")
-                        if "404" in error:
-                            st.warning("提示：公钥未在系统中注册，请先使用邀请码注册。")
-                    else:
-                        st.session_state.logged_in = True
-                        st.session_state.private_key = private_key_input
-                        st.session_state.public_key = public_key
-                        st.session_state.user_details = data
-                        st.session_state.username = data.get('username', '已登录')
-                        st.success("登录成功！")
-                        st.rerun() 
+                    with st.spinner("正在验证..."):
+                        payload = {"username_or_uid": username_or_uid, "password": password}
+                        data, error = api_call('POST', '/login', payload=payload)
+                        
+                        if error:
+                            st.error(f"登录失败: {error}")
+                        else:
+                            st.session_state.logged_in = True
+                            st.session_state.private_key = data['private_key']
+                            st.session_state.public_key = data['public_key']
+                            st.session_state.username = data['username']
+                            st.session_state.uid = data['uid']
+                            
+                            details, _ = api_call('GET', "/user/details/", params={"public_key": data['public_key']})
+                            st.session_state.user_details = details
+                            
+                            st.success("登录成功！")
+                            st.rerun()
 
     with register_tab:
+        # --- (核心修改：彻底移除普通用户的密钥显示) ---
         if st.session_state.new_user_info:
             data = st.session_state.new_user_info
-            st.success(f"账户 '{data['username']}' 创建成功！")
-            st.warning("🚨 **请立即复制并安全备份你的私钥！** 🚨\n\n这是你唯一一次看到它。丢失后，你的资产将**永久无法找回**。")
-            
-            st.text_area("你的公钥 (你的“地址”)", data['public_key'], height=150, disabled=True)
-            st.text_area("‼️ 你的私钥 (你的“密码”) ‼️", data['private_key'], height=300, disabled=True)
-            
-            st_copy_to_clipboard_button(data['private_key'], "点此一键复制私钥", "reg_pk")
-            
-            st.info("请确保已将私钥保存在安全的地方（如密码管理器）。")
+            st.success(f"🎉 账户 '{data['username']}' (UID: {data['uid']}) 创建成功！")
+            st.info("你现在可以使用刚刚注册的用户名和密码在“登录”页面进行登录。")
+            st.balloons()
 
-            if st.button("我已复制并妥善保管私钥，立即登录", type="primary"):
-                st.session_state.logged_in = True
-                st.session_state.private_key = data['private_key']
-                st.session_state.public_key = data['public_key']
-                st.session_state.username = data['username']
-                
-                with st.spinner("正在完成登录..."):
-                    details, details_error = api_call('GET', "/user/details/", params={"public_key": data['public_key']})
-                    if details_error:
-                        st.error(f"自动登录时获取详情失败: {details_error}")
-                        st.info("不过别担心，你已经登录了。请稍后手动刷新数据。")
-                        time.sleep(2)
-                    else:
-                        st.session_state.user_details = details
-                
+            if st.button("太棒了，立即前往登录页面", type="primary"):
                 st.session_state.new_user_info = None
                 st.rerun()
         else:
+            # ... (注册表单部分代码不变) ...
             st.subheader("注册新账户")
             with st.form("register_form"):
                 username = st.text_input("输入你的用户名 (3-15个字符)", key="reg_username", max_chars=15)
+                password = st.text_input("设置你的密码 (至少6位)", type="password")
+                confirm_password = st.text_input("确认密码", type="password")
                 invitation_code = st.text_input("输入你的邀请码", key="reg_inv_code", help="邀请码不区分大小写")
                 
                 submitted = st.form_submit_button("注册")
 
                 if submitted:
-                    if not username or len(username) < 3:
+                    if not all([username, password, confirm_password, invitation_code]):
+                        st.error("所有字段都必须填写。")
+                    elif len(username) < 3:
                         st.error("请输入至少3个字符的用户名。")
-                    elif not invitation_code:
-                        st.error("请输入邀请码。")
+                    elif len(password) < 6:
+                        st.error("密码至少需要6位。")
+                    elif password != confirm_password:
+                        st.error("两次输入的密码不一致！")
                     else:
                         with st.spinner("正在创建账户..."):
-                            payload = {'username': username, 'invitation_code': invitation_code}
+                            payload = {
+                                'username': username, 
+                                'password': password,
+                                'invitation_code': invitation_code
+                            }
                             data, error = api_call('POST', '/register', payload=payload)
                             
                             if error:
@@ -315,9 +399,7 @@ def show_login_register():
                             else:
                                 st.session_state.new_user_info = data
                                 st.rerun()
-
 # --- 数据获取与格式化辅助函数 ---
-
 def get_user_details(force_refresh=False):
     """获取并缓存当前用户的详细信息。"""
     if not force_refresh and st.session_state.user_details:
@@ -398,6 +480,7 @@ def render_sidebar(details):
     """渲染侧边栏"""
     with st.sidebar:
         st.header(f"你好, {st.session_state.username}!")
+        st.caption(f"UID: {st.session_state.uid}") # <--- 新增
         
         if st.button("🔄 刷新数据"):
             st.cache_data.clear() 
@@ -423,7 +506,7 @@ def render_sidebar(details):
                                 st.session_state.global_message = {'type': 'error', 'text': f"邀请码生成失败: {error}"}
                             else:
                                 st.balloons()
-                                st.session_state.global_message = {'type': 'success', 'text': f"邀请码生成成功！{data.get('detail')}"}
+                                st.session_state.global_message = {'type': 'success', 'text': f"邀请码生成成功！"}
                             st.cache_data.clear()
                             st.rerun()
 
@@ -449,10 +532,7 @@ def render_sidebar(details):
         img.save(buf, format="PNG")
         st.image(buf, caption="我的收款码", use_container_width=True)
 
-        with st.expander("显示我的私钥"):
-            st.warning("不要泄露你的私钥！")
-            st.text_area("Private Key", st.session_state.private_key, height=250, disabled=True, key="sidebar_privkey")
-            st_copy_to_clipboard_button(st.session_state.private_key, "复制私钥", "sidebar_pk")
+        
         
         if st.button("退出登录"):
             st.session_state.clear() 
@@ -460,6 +540,99 @@ def render_sidebar(details):
             time.sleep(1)
             st.rerun()
 
+def render_community_tab():
+    """(新增) 渲染'社区'选项卡，用于查看用户主页"""
+    st.header("👥 社区")
+    
+    search_term = st.text_input("搜索用户 (输入用户名或UID)", placeholder="例如: admin 或 123456")
+
+    if search_term:
+        with st.spinner(f"正在查找 '{search_term}'..."):
+            profile_data, error = api_call_cached('GET', f'/profile/{search_term}')
+            if error:
+                st.error(f"查找失败: {error}")
+            elif not profile_data:
+                st.warning("未找到该用户。")
+            else:
+                st.subheader(f"✨ {profile_data['username']} 的个人主页")
+                st.caption(f"UID: {profile_data['uid']} | 加入于: {format_dt(profile_data['created_at'])}")
+                
+                # 显示个人签名
+                st.markdown("---")
+                signature = profile_data.get('signature') or "这个人很懒，什么都没留下..."
+                st.info(f"“{signature}”")
+                st.markdown("---")
+                
+                # 显示展出的NFT
+                st.subheader("NFT 展柜")
+                nfts = profile_data.get('displayed_nfts_details', [])
+                if not nfts:
+                    st.caption(f"{profile_data['username']} 还没有展出任何NFT。")
+                else:
+                    cols = st.columns(2)
+                    for i, nft in enumerate(nfts):
+                        with cols[i % 2]:
+                            with st.container(border=True):
+                                # 使用通用的渲染器，但上下文设为 'profile' 以禁用交互
+                                render_nft(st, nft, 0, None, None, view_context="profile")
+
+
+def render_settings_tab():
+    """(新增) 渲染'个人设置'选项卡"""
+    st.header("⚙️ 个人设置")
+    st.subheader("编辑我的个人主页")
+
+    # 获取当前用户的个人资料以填充默认值
+    my_profile, error = api_call_cached('GET', f"/profile/{st.session_state.uid}")
+    if error:
+        st.error(f"无法加载你的个人资料: {error}")
+        return
+
+    current_signature = my_profile.get('signature', '')
+    current_displayed_ids = [nft['nft_id'] for nft in my_profile.get('displayed_nfts_details', [])]
+
+    with st.form("profile_edit_form"):
+        st.text_area("我的签名", value=current_signature, key="profile_sig_input", max_chars=100)
+        
+        # 获取用户的所有NFT以供选择
+        my_nfts_data, nfts_error = api_call_cached('GET', '/nfts/my/', params={"public_key": st.session_state.public_key})
+        if nfts_error:
+            st.warning("无法加载你的NFT列表。")
+            nft_options = {}
+        else:
+            nft_options = {
+                f"{nft['data'].get('name', nft['nft_type'])} ({nft['nft_id'][:6]})": nft['nft_id']
+                for nft in my_nfts_data.get('nfts', [])
+            }
+        
+        selected_nft_ids = st.multiselect(
+            "选择要展出的NFT (最多6个)",
+            options=nft_options.keys(),
+            default=[k for k, v in nft_options.items() if v in current_displayed_ids],
+            max_selections=6
+        )
+        
+        submitted = st.form_submit_button("保存更改", type="primary")
+        if submitted:
+            final_nft_ids = [nft_options[key] for key in selected_nft_ids]
+            new_signature = st.session_state.profile_sig_input
+
+            with st.spinner("正在保存..."):
+                message_dict = {
+                    "owner_key": st.session_state.public_key,
+                    "signature": new_signature,
+                    "displayed_nfts": final_nft_ids
+                }
+                signed_payload = create_signed_message(message_dict)
+                if signed_payload:
+                    res, err = api_call('POST', '/profile/update', payload=signed_payload)
+                    if err:
+                        st.error(f"更新失败: {err}")
+                    else:
+                        st.success(f"更新成功！{res.get('detail')}")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
 def render_wallet_tab():
     """渲染'我的钱包'选项卡"""
     st.header("我的钱包")
@@ -1046,42 +1219,22 @@ def render_admin_tab():
                                         st.rerun()
 
                     st.divider()
-                    st.write("**查询用户私钥 (高风险操作)**")
-                    st.error("警告：此操作将会在界面上显示用户的私钥。请确保在安全的环境下操作，不要截图或分享。")
-
-                    if st.button(f"查询用户 '{manage_user}' 的私钥"):
-                        with st.spinner("正在向后端请求私钥..."):
-                            params = {"public_key": target_key}
-                            data, error = api_call('GET', '/admin/private_key/', params=params, headers=admin_headers)
-
-                            if error:
-                                st.error(f"查询私钥失败: {error}")
-                                if 'retrieved_private_key' in st.session_state:
-                                    del st.session_state['retrieved_private_key']
+                    st.write("**重置用户密码 (高风险操作)**")
+                    st.error("警告：此操作将强制为用户设置一个新密码。请在用户请求或紧急情况下使用。")
+                    with st.form("reset_password_form"):
+                        new_password = st.text_input("输入新密码 (至少6位)", type="password")
+                        if st.form_submit_button("确认重置密码", type="primary"):
+                            if not new_password or len(new_password) < 6:
+                                st.error("新密码至少需要6个字符。")
                             else:
-                                st.session_state.retrieved_private_key = {
-                                    'public_key': target_key,
-                                    'username': manage_user,
-                                    'private_key': data.get('private_key')
-                                }
-                                st.rerun() 
-                    
-                    if 'retrieved_private_key' in st.session_state and st.session_state.retrieved_private_key['public_key'] == target_key:
-                        retrieved_data = st.session_state.retrieved_private_key
-                        st.success(f"已成功获取用户 '{retrieved_data['username']}' 的私钥：")
-                        st.text_area(
-                            "用户私钥",
-                            retrieved_data['private_key'],
-                            height=300,
-                            disabled=True,
-                            key=f"retrieved_pk_{target_key}"
-                        )
-                        st_copy_to_clipboard_button(
-                            retrieved_data['private_key'],
-                            "点此复制该私钥",
-                            f"copy_retrieved_pk_{target_key}"
-                        )
-            
+                                with st.spinner("正在发送重置指令..."):
+                                    payload = {"public_key": target_key, "new_password": new_password}
+                                    data, error = api_call('POST', '/admin/reset_password', payload=payload, headers=admin_headers)
+                                    if error:
+                                        st.error(f"重置失败: {error}")
+                                    else:
+                                        st.success(f"重置成功！{data.get('detail')}")
+                
             with admin_nft_tab:
                 st.subheader("💎 NFT 铸造与发行")
                 
@@ -1272,15 +1425,15 @@ def show_main_app():
     # --- 渲染侧边栏 ---
     render_sidebar(details)
     
-    # --- 创建主选项卡布局 ---
+    # --- 创建主选项卡布局 (核心修改) ---
     is_admin = details.get('invited_by') == 'GENESIS'
-    tabs_list = ["我的钱包", "转账", "🛒 商店", "🖼️ 我的收藏"]
+    tabs_list = ["我的钱包", "转账", "🛒 商店", "🖼️ 我的收藏", "👥 社区", "⚙️ 个人设置"] # <--- 修改
     if is_admin:
         tabs_list.append("⭐ 管理员 ⭐")
     
     tabs = st.tabs(tabs_list)
 
-    # --- 在每个选项卡中调用对应的渲染函数 ---
+    # --- 在每个选项卡中调用对应的渲染函数 (核心修改) ---
     with tabs[0]:
         render_wallet_tab()
         
@@ -1288,16 +1441,21 @@ def show_main_app():
         render_transfer_tab()
 
     with tabs[2]:
-        # 商店标签需要当前余额来显示
         balance_data, _ = api_call_cached('GET', "/balance/", params={"public_key": st.session_state.public_key})
         balance = balance_data.get('balance', 0.0) if balance_data else 0.0
         render_shop_tab(balance)
 
     with tabs[3]:
         render_collection_tab()
+
+    with tabs[4]:
+        render_community_tab() # <--- 新增
+        
+    with tabs[5]:
+        render_settings_tab() # <--- 新增
     
     if is_admin:
-        with tabs[4]:
+        with tabs[len(tabs_list)-1]: # 确保总是最后一个tab
             render_admin_tab()
 
 
