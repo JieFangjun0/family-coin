@@ -72,6 +72,23 @@ def init_db():
         )
         ''')
         
+        # <<< --- 新增：好友关系表 --- >>>
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS friendships (
+            user1_key TEXT NOT NULL,
+            user2_key TEXT NOT NULL,
+            status TEXT NOT NULL, -- 'PENDING', 'ACCEPTED'
+            action_user_key TEXT NOT NULL, -- 记录发起请求的用户
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user1_key, user2_key),
+            FOREIGN KEY (user1_key) REFERENCES users (public_key),
+            FOREIGN KEY (user2_key) REFERENCES users (public_key),
+            FOREIGN KEY (action_user_key) REFERENCES users (public_key)
+        )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_friendships_status ON friendships (status)")
+        # <<< --- 新增代码结束 --- >>>
+
         # --- 余额表 (不变) ---
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS balances (
@@ -161,7 +178,7 @@ def init_db():
         # 添加邀请人成功邀请新用户的奖励设置
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('inviter_bonus_amount', '200'))
         conn.commit()
-        print("数据库初始化完成 (V3.0 Market)。")
+        print("数据库初始化完成 (V3.1 Friends)。")
 
 # <<< --- 核心重构：全新的、通用的NFT验证函数 --- >>>
 def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
@@ -579,7 +596,7 @@ def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = """
-            SELECT l.*, u.username as lister_username, n.data as nft_data
+            SELECT l.*, u.username as lister_username, u.uid as lister_uid, n.data as nft_data
             FROM market_listings l
             JOIN users u ON l.lister_key = u.public_key
             LEFT JOIN nfts n ON l.nft_id = n.nft_id
@@ -613,7 +630,7 @@ def get_offers_for_listing(listing_id: str) -> list:
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = """
-            SELECT o.*, u.username as offerer_username, n.nft_type, n.data as nft_data
+            SELECT o.*, u.username as offerer_username, u.uid as offerer_uid, n.nft_type, n.data as nft_data
             FROM market_offers o
             JOIN users u ON o.offerer_key = u.public_key
             JOIN nfts n ON o.offered_nft_id = n.nft_id
@@ -685,7 +702,7 @@ def register_user(username: str, password: str, invitation_code: str) -> (bool, 
                 
             inviter_key = code_data['generated_by']
             
-            # --- 核心修正: 在这里生成密钥并哈希密码 ---
+            # --- 在这里生成密钥并哈希密码 ---
             private_key, public_key = generate_key_pair()
             password_hash = generate_password_hash(password)
             
@@ -698,7 +715,7 @@ def register_user(username: str, password: str, invitation_code: str) -> (bool, 
             default_quota_str = get_setting('default_invitation_quota')
             default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
             
-            # --- 核心修正: 使用单一、正确的 INSERT 语句 ---
+            # --- 使用单一、正确的 INSERT 语句 ---
             cursor.execute(
                 "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (public_key, uid, username, password_hash, inviter_key, default_quota, private_key)
@@ -709,8 +726,7 @@ def register_user(username: str, password: str, invitation_code: str) -> (bool, 
 
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
             
-            # --- 发放奖励逻辑 (这部分本身是正确的，保留即可) ---
-            # <<< --- 新增代码: 发放新用户奖励 --- >>>
+            # <<< --- 发放新用户奖励 --- >>>
             cursor.execute("SELECT value FROM settings WHERE key = ?", ('welcome_bonus_amount',))
             bonus_setting = cursor.fetchone()
             if bonus_setting:
@@ -727,7 +743,7 @@ def register_user(username: str, password: str, invitation_code: str) -> (bool, 
                 except (ValueError, TypeError):
                     pass 
             
-            # <<< --- 新增代码: 发放邀请人奖励 --- >>>
+            # <<< --- 发放邀请人奖励 --- >>>
             cursor.execute("SELECT value FROM settings WHERE key = ?", ('inviter_bonus_amount',))
             inviter_bonus_setting = cursor.fetchone()
             if inviter_bonus_setting:
@@ -748,6 +764,16 @@ def register_user(username: str, password: str, invitation_code: str) -> (bool, 
                 "UPDATE invitation_codes SET is_used = 1, used_by = ? WHERE code = ?",
                 (public_key, invitation_code)
             )
+
+            # <<< --- 新增代码: 自动添加好友 --- >>>
+            if inviter_key != GENESIS_ACCOUNT:
+                # 确保 user1_key < user2_key 以避免重复和简化查询
+                user1, user2 = sorted([public_key, inviter_key])
+                cursor.execute(
+                    "INSERT INTO friendships (user1_key, user2_key, status, action_user_key) VALUES (?, ?, 'ACCEPTED', ?)",
+                    (user1, user2, inviter_key)
+                )
+            # <<< --- 新增代码结束 --- >>>
             
             conn.commit()
             # 返回新用户信息，但不包括私钥
@@ -882,10 +908,8 @@ def get_user_details(public_key: str, conn=None) -> dict:
                 u.invitation_quota,
                 u.invited_by,
                 u.is_active,
-                CASE
-                    WHEN u.invited_by = 'GENESIS' THEN '--- 系统 ---'
-                    ELSE (SELECT inviter.username FROM users inviter WHERE inviter.public_key = u.invited_by)
-                END as inviter_username
+                (SELECT inviter.username FROM users inviter WHERE inviter.public_key = u.invited_by) as inviter_username,
+                (SELECT inviter.uid FROM users inviter WHERE inviter.public_key = u.invited_by) as inviter_uid
             FROM users u
             WHERE u.public_key = ?
             """,
@@ -897,6 +921,12 @@ def get_user_details(public_key: str, conn=None) -> dict:
 
         user_dict = dict(user_details)
         user_dict['is_active'] = bool(user_dict['is_active'])
+        
+        # --- 兼容创世用户 ---
+        if user_dict['invited_by'] == 'GENESIS':
+            user_dict['inviter_username'] = '--- 系统 ---'
+            user_dict['inviter_uid'] = None
+
 
         cursor.execute(
             "SELECT COUNT(*) as tx_count FROM transactions WHERE from_key = ? OR to_key = ?",
@@ -906,10 +936,8 @@ def get_user_details(public_key: str, conn=None) -> dict:
         return user_dict
 
     if conn:
-        # 如果提供了数据库连接，就直接使用它
         return run_logic(conn)
     else:
-        # 否则，像往常一样创建新连接
         with get_db_connection() as new_conn:
             return run_logic(new_conn)
 
@@ -930,13 +958,17 @@ def get_transaction_history(public_key: str) -> list:
             SELECT 
                 tx_id, from_key, to_key, amount, timestamp, 'out' as type, note,
                 (SELECT username FROM users WHERE public_key = T.from_key) as from_username,
-                (SELECT username FROM users WHERE public_key = T.to_key) as to_username
+                (SELECT uid FROM users WHERE public_key = T.from_key) as from_uid,
+                (SELECT username FROM users WHERE public_key = T.to_key) as to_username,
+                (SELECT uid FROM users WHERE public_key = T.to_key) as to_uid
             FROM transactions T WHERE from_key = ?
             UNION ALL
             SELECT 
                 tx_id, from_key, to_key, amount, timestamp, 'in' as type, note,
                 (SELECT username FROM users WHERE public_key = T.from_key) as from_username,
-                (SELECT username FROM users WHERE public_key = T.to_key) as to_username
+                (SELECT uid FROM users WHERE public_key = T.from_key) as from_uid,
+                (SELECT username FROM users WHERE public_key = T.to_key) as to_username,
+                (SELECT uid FROM users WHERE public_key = T.to_key) as to_uid
             FROM transactions T WHERE to_key = ?
             ORDER BY timestamp DESC
             """,
@@ -1008,7 +1040,7 @@ def get_all_balances(include_inactive=False) -> list:
         cursor = conn.cursor()
         query = """
             SELECT 
-                u.username, b.public_key, b.balance, u.is_active,
+                u.username, u.uid, b.public_key, b.balance, u.is_active,
                 u.invitation_quota, u.invited_by, inviter.username as inviter_username
             FROM users u
             JOIN balances b ON u.public_key = b.public_key
@@ -1300,3 +1332,132 @@ def admin_reset_user_password(public_key: str, new_password: str) -> (bool, str)
         except Exception as e:
             conn.rollback()
             return False, f"重置密码失败: {e}"
+        
+# ==============================================================================
+# --- 新增：好友系统函数 ---
+# ==============================================================================
+
+def get_friendship_status(user_a_key: str, user_b_key: str) -> dict:
+    """检查两个用户之间的好友关系状态。"""
+    if user_a_key == user_b_key:
+        return {"status": "SELF"}
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        user1, user2 = sorted([user_a_key, user_b_key])
+        cursor.execute(
+            "SELECT status, action_user_key FROM friendships WHERE user1_key = ? AND user2_key = ?",
+            (user1, user2)
+        )
+        result = cursor.fetchone()
+        if not result:
+            return {"status": "NONE"}
+        
+        return {
+            "status": result['status'],
+            "action_user_key": result['action_user_key']
+        }
+
+def send_friend_request(requester_key: str, target_key: str) -> (bool, str):
+    """发送一个好友请求。"""
+    if requester_key == target_key:
+        return False, "不能添加自己为好友"
+
+    status_info = get_friendship_status(requester_key, target_key)
+    if status_info['status'] != 'NONE':
+        return False, f"无法发送请求，当前状态: {status_info['status']}"
+
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            user1, user2 = sorted([requester_key, target_key])
+            cursor.execute(
+                "INSERT INTO friendships (user1_key, user2_key, status, action_user_key) VALUES (?, ?, 'PENDING', ?)",
+                (user1, user2, requester_key)
+            )
+            conn.commit()
+            return True, "好友请求已发送"
+        except Exception as e:
+            conn.rollback()
+            return False, f"发送请求失败: {e}"
+
+def respond_to_friend_request(responder_key: str, requester_key: str, accept: bool) -> (bool, str):
+    """回应一个好友请求。"""
+    status_info = get_friendship_status(responder_key, requester_key)
+    if status_info.get('status') != 'PENDING' or status_info.get('action_user_key') != requester_key:
+        return False, "不存在来自该用户的有效好友请求"
+        
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            user1, user2 = sorted([responder_key, requester_key])
+            if accept:
+                cursor.execute(
+                    "UPDATE friendships SET status = 'ACCEPTED' WHERE user1_key = ? AND user2_key = ?",
+                    (user1, user2)
+                )
+                message = "已接受好友请求"
+            else:
+                cursor.execute(
+                    "DELETE FROM friendships WHERE user1_key = ? AND user2_key = ?",
+                    (user1, user2)
+                )
+                message = "已拒绝好友请求"
+            conn.commit()
+            return True, message
+        except Exception as e:
+            conn.rollback()
+            return False, f"处理请求失败: {e}"
+
+def delete_friend(deleter_key: str, friend_to_delete_key: str) -> (bool, str):
+    """单方面删除好友。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            user1, user2 = sorted([deleter_key, friend_to_delete_key])
+            cursor.execute(
+                "DELETE FROM friendships WHERE user1_key = ? AND user2_key = ? AND status = 'ACCEPTED'",
+                (user1, user2)
+            )
+            if cursor.rowcount == 0:
+                return False, "你们不是好友关系"
+            conn.commit()
+            return True, "好友已删除"
+        except Exception as e:
+            conn.rollback()
+            return False, f"删除好友失败: {e}"
+
+def get_friends(public_key: str) -> list:
+    """获取一个用户的所有好友列表。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT u.public_key, u.username, u.uid
+            FROM users u
+            JOIN (
+                SELECT CASE
+                           WHEN user1_key = :pk THEN user2_key
+                           ELSE user1_key
+                       END AS friend_key
+                FROM friendships
+                WHERE (user1_key = :pk OR user2_key = :pk) AND status = 'ACCEPTED'
+            ) f ON u.public_key = f.friend_key
+            WHERE u.is_active = 1
+            ORDER BY u.username;
+        """
+        cursor.execute(query, {"pk": public_key})
+        return [dict(row) for row in cursor.fetchall()]
+
+def get_friend_requests(public_key: str) -> list:
+    """获取收到的好友请求列表。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT u.public_key, u.username, u.uid, f.created_at
+            FROM users u
+            JOIN friendships f ON u.public_key = f.action_user_key
+            WHERE ((f.user1_key = :pk OR f.user2_key = :pk) AND f.status = 'PENDING' AND f.action_user_key != :pk)
+            ORDER BY f.created_at DESC;
+        """
+        cursor.execute(query, {"pk": public_key})
+        return [dict(row) for row in cursor.fetchall()]

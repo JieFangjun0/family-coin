@@ -39,6 +39,38 @@ class UserLoginResponse(BaseModel): # <--- 新增
     username: str
     uid: str
 
+class FriendActionMessage(BaseModel): # <--- 新增
+    owner_key: str
+    target_key: str
+    timestamp: float
+
+class FriendRespondMessage(BaseModel): # <--- 新增
+    owner_key: str
+    requester_key: str
+    accept: bool
+    timestamp: float
+
+class FriendInfo(BaseModel): # <--- 新增
+    username: str
+    public_key: str
+    uid: str
+
+class FriendListResponse(BaseModel): # <--- 新增
+    friends: List[FriendInfo]
+
+class FriendRequestInfo(BaseModel): # <--- 新增
+    username: str
+    public_key: str
+    uid: str
+    created_at: str
+
+class FriendRequestListResponse(BaseModel): # <--- 新增
+    requests: List[FriendRequestInfo]
+
+class FriendshipStatusResponse(BaseModel): # <--- 新增
+    status: str # 'NONE', 'PENDING', 'ACCEPTED', 'SELF'
+    action_user_key: Optional[str] = None
+    
 class TransactionMessage(BaseModel):
     from_key: str
     to_key: str
@@ -422,10 +454,27 @@ def api_get_user_details(public_key: str):
     return UserDetailsResponse(**details)
 
 @app.get("/users/list", response_model=UserListResponse, tags=["User"])
-def api_get_all_users():
-    users = ledger.get_all_active_users()
-    # UserInfo Pydantic model might need 'uid' field if you want to return it here.
-    # For now, assuming it's not strictly needed in the general user list.
+def api_get_all_users(public_key: str):
+    """
+    获取用户列表。
+    - 如果请求者是管理员(创世用户)，返回所有活跃用户。
+    - 如果是普通用户，返回其好友列表。
+    """
+    if not public_key:
+        raise HTTPException(status_code=400, detail="必须提供 public_key")
+
+    # 检查用户是否为管理员
+    user_details = ledger.get_user_details(public_key)
+    if not user_details:
+        raise HTTPException(status_code=404, detail="请求用户不存在")
+
+    if user_details.get('invited_by') == 'GENESIS':
+        # 管理员获取所有用户
+        users = ledger.get_all_active_users()
+    else:
+        # 普通用户获取好友
+        users = ledger.get_friends(public_key)
+        
     return UserListResponse(users=users)
 
 @app.post("/user/generate_invitation", response_model=InvitationCodeResponse, tags=["User"])
@@ -447,6 +496,74 @@ def api_get_my_invitations(public_key: str):
     codes = ledger.get_my_invitation_codes(public_key)
     return InvitationCodeListResponse(codes=codes)
 
+# ==============================================================================
+# --- 新增: 好友系统接口 ---
+# ==============================================================================
+@app.get("/friends/status/{target_key}", response_model=FriendshipStatusResponse, tags=["Friends"])
+def api_get_friendship_status(target_key: str, current_user_key: str):
+    """检查当前用户与目标用户之间的好友关系状态。"""
+    if not current_user_key or not target_key:
+        raise HTTPException(status_code=400, detail="必须同时提供当前用户和目标用户的公钥")
+    status_info = ledger.get_friendship_status(current_user_key, target_key)
+    return FriendshipStatusResponse(**status_info)
+
+
+@app.post("/friends/request", response_model=SuccessResponse, tags=["Friends"])
+def api_send_friend_request(request: MarketSignedRequest):
+    """发送好友请求。"""
+    message = get_verified_message(request, FriendActionMessage)
+    success, detail = ledger.send_friend_request(
+        requester_key=message.owner_key,
+        target_key=message.target_key
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+
+@app.post("/friends/respond", response_model=SuccessResponse, tags=["Friends"])
+def api_respond_to_friend_request(request: MarketSignedRequest):
+    """回应好友请求 (接受/拒绝)。"""
+    message = get_verified_message(request, FriendRespondMessage)
+    success, detail = ledger.respond_to_friend_request(
+        responder_key=message.owner_key,
+        requester_key=message.requester_key,
+        accept=message.accept
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+
+@app.post("/friends/delete", response_model=SuccessResponse, tags=["Friends"])
+def api_delete_friend(request: MarketSignedRequest):
+    """删除好友。"""
+    message = get_verified_message(request, FriendActionMessage)
+    success, detail = ledger.delete_friend(
+        deleter_key=message.owner_key,
+        friend_to_delete_key=message.target_key
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+
+@app.get("/friends/list", response_model=FriendListResponse, tags=["Friends"])
+def api_get_friend_list(public_key: str):
+    """获取我的好友列表。"""
+    if not public_key:
+        raise HTTPException(status_code=400, detail="必须提供 public_key")
+    friends = ledger.get_friends(public_key)
+    return FriendListResponse(friends=friends)
+
+
+@app.get("/friends/requests", response_model=FriendRequestListResponse, tags=["Friends"])
+def api_get_friend_requests(public_key: str):
+    """获取我收到的待处理好友请求。"""
+    if not public_key:
+        raise HTTPException(status_code=400, detail="必须提供 public_key")
+    requests = ledger.get_friend_requests(public_key)
+    return FriendRequestListResponse(requests=requests)
 # --- NFT 接口 ---
 @app.get("/nfts/display_names", tags=["NFT"])
 def api_get_nft_display_names():
@@ -647,15 +764,21 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
     if not config.get("creatable") or config.get("cost") != message.cost:
         raise HTTPException(status_code=400, detail="NFT创建配置不匹配或该NFT不可创建")
 
+    # <<< --- BUG修复 #3：预先检查余额 --- >>>
+    if ledger.get_balance(message.owner_key) < message.cost:
+        raise HTTPException(status_code=400, detail="你的余额不足以支付铸造成本")
+    # <<< --- 修复结束 --- >>>
+
     with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
+        # 扣款现在应该总是成功的
         success, detail = ledger._create_system_transaction(message.owner_key, ledger.BURN_ACCOUNT, message.cost, f"商店铸造NFT: {message.nft_type}", conn)
         if not success:
             conn.rollback()
-            raise HTTPException(status_code=400, detail=f"支付失败: {detail}")
+            # 这种情况理论上不应发生，但作为保险
+            raise HTTPException(status_code=500, detail=f"支付失败: {detail}")
         
-        user_details = ledger.get_user_details(message.owner_key, conn) # 在事务中查询
+        user_details = ledger.get_user_details(message.owner_key, conn)
         if not user_details:
-             # 理论上不会发生，因为能支付成功说明用户存在
             conn.rollback()
             raise HTTPException(status_code=404, detail="无法找到铸造者信息")
 
@@ -685,6 +808,11 @@ def api_perform_shop_action(request: MarketSignedRequest):
     if not config.get("creatable") or config.get("cost") != message.cost:
         raise HTTPException(status_code=400, detail="商店配置不匹配或该物品不可用")
 
+    # <<< --- BUG修复 #3：预先检查余额 --- >>>
+    if ledger.get_balance(message.owner_key) < message.cost:
+        raise HTTPException(status_code=400, detail="你的余额不足以支付此操作的费用")
+    # <<< --- 修复结束 --- >>>
+
     with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
         # 1. 扣款
         success, detail = ledger._create_system_transaction(
@@ -696,7 +824,7 @@ def api_perform_shop_action(request: MarketSignedRequest):
         )
         if not success:
             conn.rollback()
-            raise HTTPException(status_code=400, detail=f"支付失败: {detail}")
+            raise HTTPException(status_code=500, detail=f"支付失败: {detail}")
 
         # 2. 执行插件定义的动作
         user_details = ledger.get_user_details(message.owner_key, conn)
@@ -705,7 +833,7 @@ def api_perform_shop_action(request: MarketSignedRequest):
         success, detail, new_nft_id = handler.execute_shop_action(message.owner_key, username, message.data, conn)
 
         if not success:
-            conn.rollback() # 很重要，如果动作失败（比如没抽中），也要回滚支付
+            conn.rollback()
             raise HTTPException(status_code=400, detail=detail)
 
         conn.commit()

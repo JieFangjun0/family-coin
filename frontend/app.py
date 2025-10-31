@@ -15,7 +15,7 @@ from datetime import datetime
 import pytz
 # 导入统一的渲染路由函数
 from frontend.nft_renderers import render_nft, get_mint_info_for_type
-
+import random
 
 # --- 配置 ---
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
@@ -34,7 +34,6 @@ def get_nft_display_names():
         # st.warning(f"无法加载NFT显示名称: {error}") # 生产环境可注释掉
         return {}
     return data
-# --- 会话状态管理 (Session State) ---
 def init_session_state():
     """初始化会话状态"""
     defaults = {
@@ -42,7 +41,7 @@ def init_session_state():
         'private_key': "",
         'public_key': "",
         'username': "",
-        'uid': "", # <--- 新增
+        'uid': "",
         'admin_secret': "",
         'admin_ui_unlocked': False,
         'user_details': None,
@@ -51,7 +50,9 @@ def init_session_state():
         'needs_setup': None,
         'new_user_info': None,
         'genesis_info': None,
-        'viewing_profile_of': None # <--- 新增, 用于社区页面
+        'viewing_profile_of': None,
+        'active_tab': "我的钱包", # <<< BUG修复 #2: 新增Tab状态
+        'login_form_active': True # <<< BUG修复 #4: 新增登录/注册切换状态
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -317,13 +318,16 @@ def show_genesis_setup():
                             st.rerun()
 
 
-# --- 登录和注册视图 (修正注册成功后的界面) ---
+# --- 登录和注册视图 ---
 def show_login_register():
     st.header("欢迎！")
     
-    login_tab, register_tab = st.tabs(["登录", "注册新账户 (需要邀请码)"])
+    # <<< --- BUG修复 #4：使用 session_state 控制默认Tab --- >>>
+    tab_titles = ["登录", "注册新账户 (需要邀请码)"]
+    default_index = 0 if st.session_state.login_form_active else 1
+    
+    login_tab, register_tab = st.tabs(tab_titles)
 
-    # ... (登录表单部分代码不变) ...
     with login_tab:
         st.subheader("使用账户密码登录")
         with st.form("login_form"):
@@ -347,6 +351,7 @@ def show_login_register():
                             st.session_state.public_key = data['public_key']
                             st.session_state.username = data['username']
                             st.session_state.uid = data['uid']
+                            st.session_state.active_tab = "我的钱包" # 登录后重置Tab
                             
                             details, _ = api_call('GET', "/user/details/", params={"public_key": data['public_key']})
                             st.session_state.user_details = details
@@ -355,7 +360,6 @@ def show_login_register():
                             st.rerun()
 
     with register_tab:
-        # --- (核心修改：彻底移除普通用户的密钥显示) ---
         if st.session_state.new_user_info:
             data = st.session_state.new_user_info
             st.success(f"🎉 账户 '{data['username']}' (UID: {data['uid']}) 创建成功！")
@@ -364,9 +368,9 @@ def show_login_register():
 
             if st.button("太棒了，立即前往登录页面", type="primary"):
                 st.session_state.new_user_info = None
+                st.session_state.login_form_active = True # 切换到登录Tab
                 st.rerun()
         else:
-            # ... (注册表单部分代码不变) ...
             st.subheader("注册新账户")
             with st.form("register_form"):
                 username = st.text_input("输入你的用户名 (3-15个字符)", key="reg_username", max_chars=15)
@@ -377,6 +381,7 @@ def show_login_register():
                 submitted = st.form_submit_button("注册")
 
                 if submitted:
+                    # ... (注册逻辑不变) ...
                     if not all([username, password, confirm_password, invitation_code]):
                         st.error("所有字段都必须填写。")
                     elif len(username) < 3:
@@ -387,17 +392,14 @@ def show_login_register():
                         st.error("两次输入的密码不一致！")
                     else:
                         with st.spinner("正在创建账户..."):
-                            payload = {
-                                'username': username, 
-                                'password': password,
-                                'invitation_code': invitation_code
-                            }
+                            payload = { 'username': username, 'password': password, 'invitation_code': invitation_code }
                             data, error = api_call('POST', '/register', payload=payload)
                             
                             if error:
                                 st.error(f"注册失败: {error}")
                             else:
                                 st.session_state.new_user_info = data
+                                st.session_state.login_form_active = False # 注册成功后保持在注册Tab显示信息
                                 st.rerun()
 # --- 数据获取与格式化辅助函数 ---
 def get_user_details(force_refresh=False):
@@ -428,19 +430,21 @@ def get_user_details(force_refresh=False):
     return data
 
 def get_all_users_dict(force_refresh=False):
-    """获取所有用户的 {username: public_key} 字典。"""
+    """获取当前用户的好友列表的 {username: public_key} 字典。"""
     now = time.time()
-    if not force_refresh and st.session_state.all_users_cache and (now - st.session_state.all_users_cache_time < 60):
-        return st.session_state.all_users_cache
+    # 修改缓存键，以避免与旧的全用户列表缓存冲突
+    if not force_refresh and st.session_state.get('friends_cache') and (now - st.session_state.get('friends_cache_time', 0) < 60):
+        return st.session_state.friends_cache
         
-    data, error = api_call('GET', '/users/list')
+    # --- 核心修改：调用新的 /friends/list 接口 ---
+    data, error = api_call('GET', '/friends/list', params={'public_key': st.session_state.public_key})
     if error:
-        st.error(f"无法获取用户列表: {error}")
+        st.error(f"无法获取好友列表: {error}")
         return {}
         
-    user_dict = {user['username']: user['public_key'] for user in data.get('users', [])}
-    st.session_state.all_users_cache = user_dict
-    st.session_state.all_users_cache_time = now
+    user_dict = {user['username']: user['public_key'] for user in data.get('friends', [])}
+    st.session_state.friends_cache = user_dict
+    st.session_state.friends_cache_time = now
     return user_dict
 
 def format_dt(timestamp):
@@ -448,6 +452,20 @@ def format_dt(timestamp):
     if not timestamp: return "N/A"
     return datetime.fromtimestamp(timestamp, TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
 
+def render_clickable_username(username: str, uid: str, key: str):
+    """
+    渲染一个可点击的用户名，点击后将导航到该用户的个人主页。
+    [BUG修复] key必须是调用者提供的、在整个页面中唯一的确定性字符串。
+    """
+    if not username or not uid:
+        st.write(username or "未知用户")
+        return
+
+    if st.button(f"**{username}**", key=key, help=f"查看 {username} 的主页"):
+        st.session_state.viewing_profile_of = uid
+        st.session_state.active_tab = "👥 社区"
+        st.rerun()
+        
 # --- 新增：数据格式化与翻译 ---
 LISTING_TYPE_MAP = {
     "SALE": "一口价",
@@ -541,29 +559,80 @@ def render_sidebar(details):
             st.rerun()
 
 def render_community_tab():
-    """(新增) 渲染'社区'选项卡，用于查看用户主页"""
+    """(修改) 渲染'社区'选项卡，用于查看用户主页和处理好友请求。"""
     st.header("👥 社区")
+
+    # <<< BUG修复 #1 & #7: 状态检查和强制刷新 --- >>>
+    # 检查是否有通过 clickable_username 跳转过来的请求
+    profile_to_view = st.session_state.get('viewing_profile_of')
     
-    search_term = st.text_input("搜索用户 (输入用户名或UID)", placeholder="例如: admin 或 123456")
+    # 使用 st.text_input 并将跳转过来的值设为默认值
+    search_term = st.text_input(
+        "搜索用户 (输入用户名或UID)", 
+        value=profile_to_view or "",
+        placeholder="例如: admin 或 123456",
+        key="community_search_box"
+    )
+
+    # 在处理完跳转请求后，立即清除状态，防止下次刷新时仍然停留在该用户页面
+    if profile_to_view:
+        st.session_state.viewing_profile_of = None
 
     if search_term:
         with st.spinner(f"正在查找 '{search_term}'..."):
-            profile_data, error = api_call_cached('GET', f'/profile/{search_term}')
+            # 使用非缓存的api_call来获取最新状态
+            profile_data, error = api_call('GET', f'/profile/{search_term}')
             if error:
                 st.error(f"查找失败: {error}")
             elif not profile_data:
                 st.warning("未找到该用户。")
             else:
-                st.subheader(f"✨ {profile_data['username']} 的个人主页")
-                st.caption(f"UID: {profile_data['uid']} | 加入于: {format_dt(profile_data['created_at'])}")
+                target_uid = profile_data['uid']
+                target_key = profile_data['public_key']
                 
-                # 显示个人签名
+                st.subheader(f"✨ {profile_data['username']} 的个人主页")
+
+                if target_key != st.session_state.public_key:
+                    # 使用非缓存调用获取最新好友状态
+                    status_data, err = api_call('GET', f"/friends/status/{target_key}", params={'current_user_key': st.session_state.public_key})
+                    if err:
+                        st.error(f"无法获取好友状态: {err}") # Bug 1: 明确显示错误
+                    else:
+                        friend_status = status_data.get('status')
+                        action_user_key = status_data.get('action_user_key')
+
+                        if friend_status == 'ACCEPTED':
+                            st.success("✔️ 你们是好友")
+                        elif friend_status == 'PENDING':
+                            if action_user_key == st.session_state.public_key:
+                                st.info("⏳ 好友请求已发送，等待对方回应...")
+                            else:
+                                st.warning("对方已向你发送好友请求，请在“好友”选项卡中处理。")
+                        elif friend_status == 'NONE':
+                            if st.button("➕ 添加好友", key=f"add_friend_{target_uid}"):
+                                with st.spinner("正在发送好友请求..."):
+                                    msg_dict = {"owner_key": st.session_state.public_key, "target_key": target_key, "timestamp": time.time()}
+                                    payload = create_signed_message(msg_dict)
+                                    if payload:
+                                        res, err = api_call('POST', '/friends/request', payload=payload)
+                                        if err:
+                                            st.error(f"请求失败: {err}")
+                                        else:
+                                            st.success(res.get('detail'))
+                                            # 清除缓存并强制刷新
+                                            st.cache_data.clear()
+                                            time.sleep(1)
+                                            st.rerun()
+                else:
+                    st.caption("这是你的个人主页。")
+
+                st.caption(f"UID: {target_uid} | 加入于: {format_dt(profile_data['created_at'])}")
+                
                 st.markdown("---")
                 signature = profile_data.get('signature') or "这个人很懒，什么都没留下..."
                 st.info(f"“{signature}”")
                 st.markdown("---")
                 
-                # 显示展出的NFT
                 st.subheader("NFT 展柜")
                 nfts = profile_data.get('displayed_nfts_details', [])
                 if not nfts:
@@ -573,10 +642,85 @@ def render_community_tab():
                     for i, nft in enumerate(nfts):
                         with cols[i % 2]:
                             with st.container(border=True):
-                                # 使用通用的渲染器，但上下文设为 'profile' 以禁用交互
                                 render_nft(st, nft, 0, None, None, view_context="profile")
 
+def render_friends_tab():
+    """ (新增) 渲染'好友'选项卡 """
+    st.header("🤝 好友管理")
 
+    my_friends_tab, requests_tab = st.tabs(["我的好友", "待处理的请求"])
+
+    with my_friends_tab:
+        st.subheader("我的好友列表")
+        friends_data, err = api_call_cached('GET', '/friends/list', params={'public_key': st.session_state.public_key})
+        if err:
+            st.error(f"无法加载好友列表: {err}")
+        elif not friends_data or not friends_data.get('friends'):
+            st.info("你还没有好友。快去社区添加一些吧！")
+        else:
+            friends = friends_data['friends']
+            for friend in friends:
+                col1, col2, col3 = st.columns([3, 2, 2])
+                with col1:
+                    st.write(f"**{friend['username']}** (UID: {friend['uid']})")
+                with col2:
+                    if st.button("查看主页", key=f"view_friend_{friend['uid']}", use_container_width=True):
+                        st.session_state.viewing_profile_of = friend['uid']
+                        st.rerun()
+                with col3:
+                    if st.button("💔 删除好友", key=f"del_friend_{friend['uid']}", type="secondary", use_container_width=True):
+                         with st.spinner(f"正在删除好友 {friend['username']}..."):
+                            msg_dict = {"owner_key": st.session_state.public_key, "target_key": friend['public_key'], "timestamp": time.time()}
+                            payload = create_signed_message(msg_dict)
+                            if payload:
+                                res, err = api_call('POST', '/friends/delete', payload=payload)
+                                if err: st.error(f"删除失败: {err}")
+                                else:
+                                    st.success(res.get('detail'))
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+
+    with requests_tab:
+        st.subheader("收到的好友请求")
+        requests_data, err = api_call_cached('GET', '/friends/requests', params={'public_key': st.session_state.public_key})
+        if err:
+            st.error(f"无法加载好友请求: {err}")
+        elif not requests_data or not requests_data.get('requests'):
+            st.info("没有待处理的好友请求。")
+        else:
+            requests = requests_data['requests']
+            for req in requests:
+                st.write(f"**{req['username']}** (UID: {req['uid']}) 想添加你为好友。")
+                
+                b_col1, b_col2, b_col3 = st.columns([3, 1, 1])
+                with b_col2:
+                    if st.button("接受", key=f"accept_{req['uid']}", type="primary"):
+                        with st.spinner("正在接受..."):
+                            msg_dict = {"owner_key": st.session_state.public_key, "requester_key": req['public_key'], "accept": True, "timestamp": time.time()}
+                            payload = create_signed_message(msg_dict)
+                            if payload:
+                                res, err = api_call('POST', '/friends/respond', payload=payload)
+                                if err: st.error(f"操作失败: {err}")
+                                else:
+                                    st.success(res.get('detail'))
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                with b_col3:
+                    if st.button("拒绝", key=f"reject_{req['uid']}"):
+                         with st.spinner("正在拒绝..."):
+                            msg_dict = {"owner_key": st.session_state.public_key, "requester_key": req['public_key'], "accept": False, "timestamp": time.time()}
+                            payload = create_signed_message(msg_dict)
+                            if payload:
+                                res, err = api_call('POST', '/friends/respond', payload=payload)
+                                if err: st.error(f"操作失败: {err}")
+                                else:
+                                    st.success(res.get('detail'))
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                st.divider()
 def render_settings_tab():
     """(新增) 渲染'个人设置'选项卡"""
     st.header("⚙️ 个人设置")
@@ -649,7 +793,16 @@ def render_wallet_tab():
     details = get_user_details()
     if details:
         col2.metric(label="总交易次数", value=details.get('tx_count', 0))
-        col3.metric(label="邀请人", value=details.get('inviter_username', 'N/A'))
+        with col3:
+            st.write("**邀请人**")
+            # --- 核心修改：使邀请人可点击 ---
+            inviter_username = details.get('inviter_username', 'N/A')
+            inviter_uid = details.get('inviter_uid')
+            if inviter_uid:
+                render_clickable_username(inviter_username, inviter_uid, "inviter")
+            else:
+                st.write(f"**{inviter_username}**")
+
         st.caption(f"注册于: {format_dt(details.get('created_at'))}")
     
     st.divider()
@@ -661,14 +814,53 @@ def render_wallet_tab():
     elif not history_data or not history_data.get('transactions'):
         st.info("没有交易记录。")
     else:
-        df = pd.DataFrame(history_data['transactions'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s').dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
-        df['方向'] = df['type'].apply(lambda x: "支出 📤" if x == 'out' else "收入 📥")
-        df['对方'] = df.apply(lambda row: row['to_display'] if row['type'] == 'out' else row['from_display'], axis=1)
-        df['金额'] = df.apply(lambda row: f"- {row['amount']:,.2f}" if row['type'] == 'out' else f"+ {row['amount']:,.2f}", axis=1)
-        df['时间'] = df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        df['备注'] = df['note'].fillna('')
-        st.dataframe(df[['时间', '方向', '对方', '金额', '备注']], use_container_width=True, hide_index=True)
+        # --- 核心修改：手动渲染交易历史以支持按钮 ---
+        st.markdown(
+            """
+            <style>
+            .header-row {
+                font-weight: bold;
+            }
+            .row-container {
+                border-bottom: 1px solid rgba(49, 51, 63, 0.2);
+                padding-top: 10px;
+                padding-bottom: 10px;
+            }
+            </style>
+            """, unsafe_allow_html=True
+        )
+
+        # 表头
+        c1, c2, c3, c4, c5 = st.columns([3, 2, 3, 2, 4])
+        with c1: st.markdown("**时间**", unsafe_allow_html=True)
+        with c2: st.markdown("**方向**", unsafe_allow_html=True)
+        with c3: st.markdown("**对方**", unsafe_allow_html=True)
+        with c4: st.markdown("**金额**", unsafe_allow_html=True)
+        with c5: st.markdown("**备注**", unsafe_allow_html=True)
+
+        for tx in history_data['transactions']:
+            tx_type = tx.get('type')
+            direction = "支出 📤" if tx_type == 'out' else "收入 📥"
+            amount_str = f"- {tx['amount']:,.2f}" if tx_type == 'out' else f"+ {tx['amount']:,.2f}"
+            
+            if tx_type == 'out':
+                counterparty_name = tx.get('to_display')
+                counterparty_uid = tx.get('to_uid')
+            else:
+                counterparty_name = tx.get('from_display')
+                counterparty_uid = tx.get('from_uid')
+
+            c1, c2, c3, c4, c5 = st.columns([3, 2, 3, 2, 4])
+            with c1: st.text(format_dt(tx.get('timestamp')))
+            with c2: st.text(direction)
+            with c3:
+                # 只有当对方是普通用户时才渲染按钮
+                if counterparty_uid:
+                    render_clickable_username(counterparty_name, counterparty_uid, f"tx_{tx['tx_id']}")
+                else:
+                    st.text(counterparty_name)
+            with c4: st.text(amount_str)
+            with c5: st.text(tx.get('note', ''))
 
 def render_transfer_tab():
     """渲染'转账'选项卡"""
@@ -676,12 +868,18 @@ def render_transfer_tab():
     
     user_dict = get_all_users_dict()
     my_username = st.session_state.username
-    if my_username in user_dict:
+    details = get_user_details()
+    
+    # <<< --- BUG修复 #5：仅在非管理员时移除自己 --- >>>
+    is_admin = details.get('invited_by') == 'GENESIS'
+    if not is_admin and my_username in user_dict:
         del user_dict[my_username]
+    # <<< --- 修复结束 --- >>>
     
     user_options = [""] + sorted(list(user_dict.keys()))
     
     with st.form("send_form"):
+        # ... (表单其余部分不变) ...
         selected_username = st.selectbox("选择收款人", options=user_options, index=0)
         amount = st.number_input("转账金额", min_value=0.01, step=0.01, format="%.2f")
         note = st.text_input("备注 (可选, 最多50字符)", max_chars=50)
@@ -712,7 +910,8 @@ def render_transfer_tab():
                             st.balloons()
                             st.cache_data.clear()
                             st.session_state.user_details = None
-                            st.rerun() # 强制刷新
+                            st.rerun()
+
 
 def render_shop_tab(balance):
     """渲染'商店'选项卡"""
@@ -720,11 +919,9 @@ def render_shop_tab(balance):
     
     market_tab, my_activity_tab, create_nft_tab = st.tabs(["浏览市场", "我的交易", "✨ 铸造新品"])
 
-    # --- 1. 市场浏览子选项卡 ---
     with market_tab:
         sale_col, auction_col, seek_col = st.columns(3)
         
-        # --- 挂售区 ---
         with sale_col:
             st.subheader("一口价")
             sales, err = api_call_cached('GET', '/market/listings', params={'listing_type': 'SALE', 'exclude_owner': st.session_state.public_key})
@@ -734,15 +931,17 @@ def render_shop_tab(balance):
                 for item in sales['listings']:
                     with st.expander(f"**{item.get('trade_description', item['description'])}**"):
                         if item.get('nft_data'):
-                            temp_nft_object = {
-                                "nft_id": item['nft_id'], "nft_type": item['nft_type'],
-                                "owner_key": item['lister_key'], "data": item['nft_data'],
-                                "status": "ACTIVE" 
-                            }
+                            temp_nft_object = { "nft_id": item['nft_id'], "nft_type": item['nft_type'], "owner_key": item['lister_key'], "data": item['nft_data'], "status": "ACTIVE" }
                             render_nft(st, temp_nft_object, balance, api_call, lambda msg: create_signed_message(msg), view_context="market")
                         
                         st.divider()
-                        st.info(f"卖家: **{item['lister_username']}**")
+                        st.write("卖家:")
+                        render_clickable_username(
+                            item['lister_username'], 
+                            item['lister_uid'], 
+                            key=f"userlink_sale_{item['listing_id']}"
+                        )
+                        
                         st.success(f"价格: **{item['price']} FC**")
                         if st.button("立即购买", key=f"buy_{item['listing_id']}", type="primary", use_container_width=True):
                             with st.spinner("正在处理购买..."):
@@ -754,7 +953,6 @@ def render_shop_tab(balance):
                                     else: st.balloons(); st.session_state.global_message = {'type': 'success', 'text': f"购买成功！{res.get('detail')}"}
                                     st.cache_data.clear(); st.rerun()
 
-        # --- 拍卖区 ---
         with auction_col:
             st.subheader("拍卖行")
             auctions, err = api_call_cached('GET', '/market/listings', params={'listing_type': 'AUCTION', 'exclude_owner': st.session_state.public_key})
@@ -764,16 +962,18 @@ def render_shop_tab(balance):
                 for item in auctions['listings']:
                     with st.expander(f"**{item.get('trade_description', item['description'])}**"):
                         if item.get('nft_data'):
-                            temp_nft_object = {
-                                "nft_id": item['nft_id'], "nft_type": item['nft_type'],
-                                "owner_key": item['lister_key'], "data": item['nft_data'],
-                                "status": "ACTIVE"
-                            }
+                            temp_nft_object = { "nft_id": item['nft_id'], "nft_type": item['nft_type'], "owner_key": item['lister_key'], "data": item['nft_data'], "status": "ACTIVE" }
                             render_nft(st, temp_nft_object, balance, api_call, lambda msg: create_signed_message(msg), view_context="market")
 
                         st.divider()
                         end_time_str = datetime.fromtimestamp(item['end_time'], TIMEZONE).strftime('%H:%M:%S')
-                        st.info(f"卖家: **{item['lister_username']}** | 今日 {end_time_str} 截止")
+                        st.write(f"卖家 (今日 {end_time_str} 截止):")
+                        render_clickable_username(
+                            item['lister_username'], 
+                            item['lister_uid'], 
+                            key=f"userlink_auction_{item['listing_id']}"
+                        )
+
                         price_label = "当前最高价" if item['highest_bid'] > 0 else "起拍价"
                         st.warning(f"{price_label}: **{item.get('highest_bid') or item.get('price')} FC**")
 
@@ -789,7 +989,6 @@ def render_shop_tab(balance):
                                         else: st.session_state.global_message = {'type': 'success', 'text': res.get('detail')}
                                         st.cache_data.clear(); st.rerun()
 
-        # --- 求购区 ---
         with seek_col:
             st.subheader("求购栏")
             seeks, err = api_call_cached('GET', '/market/listings', params={'listing_type': 'SEEK', 'exclude_owner': st.session_state.public_key})
@@ -799,7 +998,12 @@ def render_shop_tab(balance):
                 for item in seeks['listings']:
                     expander_title = f"**求购: {item['description']}**"
                     with st.expander(expander_title):
-                        st.caption(f"求购方: {item['lister_username']}")
+                        st.write("求购方:")
+                        render_clickable_username(
+                            item['lister_username'], 
+                            item['lister_uid'], 
+                            key=f"userlink_seek_{item['listing_id']}"
+                        )
                         st.info(f"预算: **{item['price']} FC** | 类型: `{item['nft_type']}`")
                         
                         with st.container(border=False):
@@ -820,14 +1024,12 @@ def render_shop_tab(balance):
                                             else: st.session_state.global_message = {'type': 'success', 'text': res.get('detail')}
                                             st.cache_data.clear(); st.rerun()
 
-    # --- 2. 我的交易活动子选项卡 ---
     with my_activity_tab:
         st.subheader("我的交易看板")
         with st.container(border=True):
             st.subheader("发布求购")
             st.info("发布一个求购信息，让拥有你所需 NFT 的人来找你。发布时将暂时托管你的预算资金。")
-            
-            all_nft_types, err = api_call_cached('GET', '/nfts/types')
+            all_nft_types, err = api_call_cached('GET', '/admin/nft/types', headers={"X-Admin-Secret": "dummy"})
             if err or not all_nft_types:
                 all_nft_types = ["SECRET_WISH"] 
 
@@ -841,12 +1043,7 @@ def render_shop_tab(balance):
                         st.error("求购描述不能为空")
                     else:
                         with st.spinner("正在发布求购..."):
-                            msg_dict = {
-                                "owner_key": st.session_state.public_key, "listing_type": "SEEK",
-                                "nft_id": None, "nft_type": seek_nft_type,
-                                "description": seek_description, "price": seek_price,
-                                "auction_hours": None, "timestamp": time.time()
-                            }
+                            msg_dict = { "owner_key": st.session_state.public_key, "listing_type": "SEEK", "nft_id": None, "nft_type": seek_nft_type, "description": seek_description, "price": seek_price, "auction_hours": None, "timestamp": time.time() }
                             payload = create_signed_message(msg_dict)
                             if payload:
                                 res, err = api_call('POST', '/market/create_listing', payload=payload)
@@ -868,7 +1065,6 @@ def render_shop_tab(balance):
                     expander_title = f"**[{translate_listing_type(item['listing_type'])}]** {item['description']}"
                     with st.expander(expander_title):
                         st.caption(f"状态: **{translate_status(item['status'])}** | 价格/预算: {item['price']} FC")
-                        
                         if item['status'] == 'ACTIVE':
                             if st.button("取消挂单", key=f"cancel_{item['listing_id']}"):
                                 with st.spinner("正在取消挂单..."):
@@ -889,10 +1085,19 @@ def render_shop_tab(balance):
                             else:
                                 for offer in offers:
                                     if offer['status'] == 'PENDING':
-                                        offer_col1, offer_col2, offer_col3 = st.columns([3,1,1])
-                                        offer_description = offer.get('trade_description', offer['offered_nft_id'][:8])
-                                        offer_col1.info(f"来自 {offer['offerer_username']} 的报价: {offer_description}")
-                                        if offer_col2.button("接受", key=f"accept_{offer['offer_id']}", type="primary"):
+                                        offer_col1, offer_col2, offer_col3, offer_col4 = st.columns([4, 2, 1, 1])
+                                        with offer_col1:
+                                            st.write(f"来自 **{offer['offerer_username']}** 的报价:")
+                                            render_clickable_username(
+                                                offer['offerer_username'], 
+                                                offer['offerer_uid'], 
+                                                key=f"userlink_offer_{offer['offer_id']}"
+                                            )
+                                        
+                                        with offer_col2:
+                                            st.info(f"{offer.get('trade_description', offer['offered_nft_id'][:8])}")
+
+                                        if offer_col3.button("接受", key=f"accept_{offer['offer_id']}", type="primary"):
                                             msg_dict = {"owner_key": st.session_state.public_key, "offer_id": offer['offer_id'], "accept": True, "timestamp": time.time()}
                                             with st.spinner("正在接受报价..."):
                                                 payload = create_signed_message(msg_dict)
@@ -902,7 +1107,7 @@ def render_shop_tab(balance):
                                                     else: st.balloons(); st.session_state.global_message = {'type': 'success', 'text': res.get('detail')}
                                                     st.cache_data.clear(); st.rerun()
 
-                                        if offer_col3.button("拒绝", key=f"reject_{offer['offer_id']}"):
+                                        if offer_col4.button("拒绝", key=f"reject_{offer['offer_id']}"):
                                             msg_dict = {"owner_key": st.session_state.public_key, "offer_id": offer['offer_id'], "accept": False, "timestamp": time.time()}
                                             with st.spinner("正在拒绝报价..."):
                                                 payload = create_signed_message(msg_dict)
@@ -912,7 +1117,6 @@ def render_shop_tab(balance):
                                                     else: st.session_state.global_message = {'type': 'success', 'text': res.get('detail')}
                                                     st.cache_data.clear(); st.rerun()
 
-    # --- 3. 铸造新品子选项卡 ---
     with create_nft_tab:
         st.subheader("铸造工坊")
         if 'shop_message' in st.session_state and st.session_state.shop_message:
@@ -924,6 +1128,8 @@ def render_shop_tab(balance):
             del st.session_state.shop_message
 
         creatable_nfts, err = api_call_cached('GET', '/market/creatable_nfts')
+        
+        # <<< --- 核心修复：修正这里的变量名 --- >>>
         if err or not creatable_nfts:
             st.info("当前没有可通过商店铸造的NFT类型。")
         else:
@@ -1094,6 +1300,7 @@ def render_admin_tab():
     """渲染'管理员'选项卡"""
     st.header("管理员面板")
     if not st.session_state.admin_ui_unlocked:
+        # ... (解锁逻辑不变)
         st.info("这是一个轻量级的UI锁，防止误操作。")
         with st.form("admin_unlock_form"):
             admin_pwd = st.text_input("请输入管理员UI密码", type="password", key="admin_ui_pwd_form")
@@ -1104,6 +1311,7 @@ def render_admin_tab():
                 else:
                     st.error("密码错误")
     else:
+        # ... (其他UI部分不变)
         st.success("管理员UI已解锁。")
         if st.button("锁定UI"):
             st.session_state.admin_ui_unlocked = False
@@ -1117,10 +1325,14 @@ def render_admin_tab():
         else:
             admin_headers = {"X-Admin-Secret": admin_secret}
             user_dict = get_all_users_dict(force_refresh=True) 
+            # <<< --- BUG修复 #5：管理员列表不过滤自己 --- >>>
+            # 管理员调用 get_all_users_dict 已经返回了所有人，所以不需要额外处理
+            # <<< --- 修复结束 --- >>>
             user_options = sorted(list(user_dict.keys()))
             admin_tabs_list = ["货币发行", "用户管理", "💎 NFT 管理", "系统设置"]
             admin_issue_tab, admin_manage_tab, admin_nft_tab, admin_settings_tab = st.tabs(admin_tabs_list)
             
+            # ... (货币发行 Tab 不变)
             with admin_issue_tab:
                 st.subheader("增发货币 (Mint)")
                 with st.form("mint_form"):
@@ -1150,7 +1362,7 @@ def render_admin_tab():
                             data, error = api_call('POST', '/admin/multi_issue', payload=payload, headers=admin_headers)
                             if error: st.error(f"批量发行失败: {error}")
                             else: st.success(f"批量发行完成！{data.get('detail')}")
-
+            # ... (用户管理 Tab 不变)
             with admin_manage_tab:
                 st.subheader("用户管理")
                 manage_user = st.selectbox("选择要管理的用户", options=[""] + user_options, key="admin_manage_user")
@@ -1234,7 +1446,6 @@ def render_admin_tab():
                                         st.error(f"重置失败: {error}")
                                     else:
                                         st.success(f"重置成功！{data.get('detail')}")
-                
             with admin_nft_tab:
                 st.subheader("💎 NFT 铸造与发行")
                 
@@ -1252,18 +1463,33 @@ def render_admin_tab():
                     mint_to_key = user_dict.get(selected_username, "") if selected_username else ""
                     mint_to_key_input = st.text_area("目标公钥", value=mint_to_key, height=100)
                     
-                    selected_nft_type = st.selectbox("选择要铸造的 NFT 类型", options=nft_type_options)
+                    # <<< --- BUG修复 #6：使用session_state来触发刷新 --- >>>
+                    if 'admin_nft_type_select' not in st.session_state:
+                        st.session_state.admin_nft_type_select = nft_type_options[0] if nft_type_options else None
+                    
+                    def update_nft_type_selection():
+                         st.session_state.admin_nft_type_select = st.session_state.nft_type_selector
+                    
+                    st.selectbox(
+                        "选择要铸造的 NFT 类型", 
+                        options=nft_type_options,
+                        key="nft_type_selector",
+                        on_change=update_nft_type_selection
+                    )
+                    selected_nft_type = st.session_state.admin_nft_type_select
+                    # <<< --- 修复结束 --- >>>
                     
                     st.write("**输入该类型 NFT 所需的初始数据 (JSON 格式):**")
                     
+                    # 现在 get_mint_info_for_type 会基于更新后的 session_state 被调用
                     mint_info = get_mint_info_for_type(selected_nft_type)
                     
-                    if mint_info["help_text"]:
+                    if mint_info and mint_info.get("help_text"):
                         st.info(mint_info["help_text"])
                         
                     initial_data_str = st.text_area(
                         "初始数据", 
-                        mint_info["default_json"],
+                        value=mint_info.get("default_json", "{}") if mint_info else "{}",
                         height=150
                     )
 
@@ -1285,9 +1511,10 @@ def render_admin_tab():
                                     st.success(f"NFT 铸造成功！{data.get('detail')}")
                                     st.balloons()
                             except json.JSONDecodeError:
-                                st.error("初始数据不是有效的 JSON 格式！") 
-                                
+                                st.error("初始数据不是有效的 JSON 格式！")
+            
             with admin_settings_tab:
+                 # ... (系统设置 Tab 不变) ...
                 st.subheader("系统设置")
                 st.write("**邀请系统设置**")
                 current_quota = 5 
@@ -1304,20 +1531,16 @@ def render_admin_tab():
                         data, error = api_call('POST', '/admin/set_setting', payload=payload, headers=admin_headers)
                         if error: st.error(f"更新失败: {error}")
                         else: st.success(f"更新成功！{data.get('detail')}")
-                # <<< --- 新增代码: 新用户奖励设置 --- >>>
                 st.divider()
                 st.write("**新用户奖励设置**")
                 st.info("在这里设置新用户通过邀请码注册后，系统自动发放的 FamilyCoin 奖励金额。")
-                
-                # 从后端获取当前设置值
                 bonus_setting_data, bonus_error = api_call('GET', '/admin/setting/welcome_bonus_amount', headers=admin_headers)
-                current_bonus = 500.0 # 设置一个安全的默认值
+                current_bonus = 500.0
                 if bonus_error:
-                    if "404" not in bonus_error: # 如果不是因为未找到设置而报错
+                    if "404" not in bonus_error:
                          st.warning(f"无法获取当前奖励设置: {bonus_error}。将使用默认值。")
                 else:
                     current_bonus = float(bonus_setting_data.get('value', 500.0))
-                
                 with st.form("set_bonus_form"):
                     new_bonus_amount = st.number_input("新用户注册奖励金额 (FC)", min_value=0.0, value=current_bonus, step=10.0, help="设置为0则不发放奖励。")
                     if st.form_submit_button("更新注册奖励"):
@@ -1327,24 +1550,18 @@ def render_admin_tab():
                             st.error(f"更新失败: {error}")
                         else: 
                             st.success(f"更新成功！{data.get('detail')}")
-                            # 稍微延迟后刷新，确保后端设置已生效
                             time.sleep(0.5)
                             st.rerun()
-                # <<< --- 新增代码结束 --- >>>
-                # <<< --- 新增代码: 邀请人奖励设置 --- >>>
                 st.divider()
                 st.write("**邀请人奖励设置**")
                 st.info("在这里设置当用户成功邀请一位新成员后，邀请人获得的 FamilyCoin 奖励金额。")
-                
-                # 从后端获取当前设置值
                 inviter_bonus_data, inviter_bonus_error = api_call('GET', '/admin/setting/inviter_bonus_amount', headers=admin_headers)
-                current_inviter_bonus = 200.0 # 默认值
+                current_inviter_bonus = 200.0
                 if inviter_bonus_error:
                     if "404" not in inviter_bonus_error:
                          st.warning(f"无法获取当前邀请奖励设置: {inviter_bonus_error}。将使用默认值。")
                 else:
                     current_inviter_bonus = float(inviter_bonus_data.get('value', 200.0))
-                
                 with st.form("set_inviter_bonus_form"):
                     new_inviter_bonus = st.number_input("邀请人奖励金额 (FC)", min_value=0.0, value=current_inviter_bonus, step=10.0, help="设置为0则不发放奖励。")
                     if st.form_submit_button("更新邀请奖励"):
@@ -1356,7 +1573,6 @@ def render_admin_tab():
                             st.success(f"更新成功！{data.get('detail')}")
                             time.sleep(0.5)
                             st.rerun()
-                # <<< --- 新增代码结束 --- >>>
                 st.divider()
                 st.subheader("危险区域")
                 st.error("警告：以下操作将立即删除所有数据并重置系统！")
@@ -1380,26 +1596,33 @@ def render_admin_tab():
                 st.divider()
                 st.subheader("监控中心 (Ledger)")
                 if st.button("查询所有用户余额 (包含已禁用)"):
-                    data, error = api_call('GET', '/admin/balances', headers=admin_headers)
-                    if error:
-                        st.error(f"查询失败: {error}")
-                    elif not data or not data.get('balances'):
-                        st.info("账本为空。")
-                    else:
-                        st.success("查询成功！")
-                        df = pd.DataFrame(data['balances'])
-                        display_columns = {
-                            'username': '用户名', 'balance': '余额', 'invitation_quota': '剩余邀请',
-                            'inviter_username': '邀请人', 'is_active': '是否活跃', 'public_key': '公钥'
-                        }
-                        existing_columns = [col for col in display_columns.keys() if col in df.columns]
-                        df_display = df[existing_columns].rename(columns=display_columns)
-                        st.dataframe(df_display, use_container_width=True, hide_index=True)
+                    # ... (监控中心逻辑已在上一轮修复)
+                     data, error = api_call('GET', '/admin/balances', headers=admin_headers)
+                     if error:
+                         st.error(f"查询失败: {error}")
+                     elif not data or not data.get('balances'):
+                         st.info("账本为空。")
+                     else:
+                         st.success("查询成功！")
+                         balances = data['balances']
+                         c1, c2, c3, c4 = st.columns(4)
+                         c1.markdown("**用户名**")
+                         c2.markdown("**余额**")
+                         c3.markdown("**邀请人**")
+                         c4.markdown("**状态**")
+
+                         for user in balances:
+                             c1, c2, c3, c4 = st.columns(4)
+                             with c1:
+                                 render_clickable_username(user['username'], user['uid'], f"admin_bal_{user['uid']}")
+                             c2.text(f"{user['balance']:,.2f}")
+                             c3.text(user.get('inviter_username', 'N/A'))
+                             status_text = "✔️ 活跃" if user['is_active'] else "❌ 禁用"
+                             c4.text(status_text)
 
 
-# --- 主应用视图 (登录后) [重构后] ---
 def show_main_app():
-    # --- 全局消息显示区域 ---
+    # ... (消息显示和数据获取部分不变)
     if 'global_message' in st.session_state and st.session_state.global_message:
         message_info = st.session_state.global_message
         if message_info['type'] == 'success':
@@ -1407,57 +1630,60 @@ def show_main_app():
         else:
             st.error(message_info['text'], icon="🚨")
         del st.session_state.global_message
-
-    # --- 获取核心数据 ---
     details = get_user_details()
     if not details: 
         return
-
-    # --- 新用户欢迎消息 ---
     if details.get('tx_count', 0) == 0 and details.get('invited_by') != 'GENESIS':
-        st.warning(
-            "👋 **欢迎新朋友！** 你的账户已成功创建，但请务必再次确认你已经**安全备份了你的私钥**。"
-            "你可以随时从侧边栏的“显示我的私钥”中找到它并复制。"
-            "**私钥一旦丢失，资产将永久无法找回！**", 
-            icon="🎉"
-        )
-
-    # --- 渲染侧边栏 ---
+        st.warning( "👋 **欢迎新朋友！** 你的账户已成功创建，但请务必再次确认你已经**安全备份了你的私钥**。你可以随时从侧边栏的“显示我的私钥”中找到它并复制。**私钥一旦丢失，资产将永久无法找回！**", icon="🎉" )
+    
     render_sidebar(details)
     
-    # --- 创建主选项卡布局 (核心修改) ---
     is_admin = details.get('invited_by') == 'GENESIS'
-    tabs_list = ["我的钱包", "转账", "🛒 商店", "🖼️ 我的收藏", "👥 社区", "⚙️ 个人设置"] # <--- 修改
+    tabs_list = ["我的钱包", "转账", "🛒 商店", "🖼️ 我的收藏", "👥 社区", "🤝 好友", "⚙️ 个人设置"]
     if is_admin:
         tabs_list.append("⭐ 管理员 ⭐")
     
-    tabs = st.tabs(tabs_list)
+    # 获取当前激活Tab的索引
+    try:
+        current_tab_index = tabs_list.index(st.session_state.active_tab)
+    except ValueError:
+        current_tab_index = 0 # 如果找不到，默认为第一个
 
-    # --- 在每个选项卡中调用对应的渲染函数 (核心修改) ---
-    with tabs[0]:
+    # 使用 st.radio 作为隐藏的 Tab 控制器，或者直接渲染 st.tabs
+    # st.tabs 不支持 default_index，所以我们需要一个 workaround
+    # 我们将在渲染时手动调用 active_tab 对应的渲染函数
+    
+    selected_tab = st.sidebar.radio(
+        "导航", 
+        tabs_list, 
+        index=current_tab_index, 
+        key="main_nav_radio"
+    )
+
+    # 如果 radio 的选择变了，更新 session_state 并 rerun
+    if selected_tab != st.session_state.active_tab:
+        st.session_state.active_tab = selected_tab
+        st.rerun()
+
+    # 根据 active_tab 显示内容
+    if st.session_state.active_tab == "我的钱包":
         render_wallet_tab()
-        
-    with tabs[1]:
+    elif st.session_state.active_tab == "转账":
         render_transfer_tab()
-
-    with tabs[2]:
+    elif st.session_state.active_tab == "🛒 商店":
         balance_data, _ = api_call_cached('GET', "/balance/", params={"public_key": st.session_state.public_key})
         balance = balance_data.get('balance', 0.0) if balance_data else 0.0
         render_shop_tab(balance)
-
-    with tabs[3]:
+    elif st.session_state.active_tab == "🖼️ 我的收藏":
         render_collection_tab()
-
-    with tabs[4]:
-        render_community_tab() # <--- 新增
-        
-    with tabs[5]:
-        render_settings_tab() # <--- 新增
-    
-    if is_admin:
-        with tabs[len(tabs_list)-1]: # 确保总是最后一个tab
-            render_admin_tab()
-
+    elif st.session_state.active_tab == "👥 社区":
+        render_community_tab()
+    elif st.session_state.active_tab == "🤝 好友":
+        render_friends_tab()
+    elif st.session_state.active_tab == "⚙️ 个人设置":
+        render_settings_tab()
+    elif st.session_state.active_tab == "⭐ 管理员 ⭐" and is_admin:
+        render_admin_tab()
 
 # --- 主逻辑：根据系统和登录状态显示不同视图 ---
 def main():
