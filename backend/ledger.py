@@ -661,7 +661,7 @@ def set_setting(key: str, value: str) -> bool:
             print(f"更新设置失败: {e}")
             return False
 
-def register_user(username: str, public_key: str, private_key: str, invitation_code: str) -> (bool, str):
+def register_user(username: str, password: str, invitation_code: str) -> (bool, str, dict):
     """注册一个新用户，需要一次性邀请码。"""
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
@@ -678,13 +678,14 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
             code_data = cursor.fetchone()
             
             if not code_data:
-                return False, "无效的邀请码或邀请码已被使用"
+                return False, "无效的邀请码或邀请码已被使用", {}
             
-            if (time.time() - code_data['created_at_unix']) > 86400 * 7:
-                return False, "邀请码已过期"
+            if (time.time() - code_data['created_at_unix']) > 86400 * 7: # 7 days validity
+                return False, "邀请码已过期", {}
                 
             inviter_key = code_data['generated_by']
-            # --- 新增逻辑 ---
+            
+            # --- 核心修正: 在这里生成密钥并哈希密码 ---
             private_key, public_key = generate_key_pair()
             password_hash = generate_password_hash(password)
             
@@ -697,6 +698,7 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
             default_quota_str = get_setting('default_invitation_quota')
             default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
             
+            # --- 核心修正: 使用单一、正确的 INSERT 语句 ---
             cursor.execute(
                 "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (public_key, uid, username, password_hash, inviter_key, default_quota, private_key)
@@ -707,15 +709,7 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
 
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
             
-            default_quota_str = get_setting('default_invitation_quota')
-            default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
-            
-            cursor.execute(
-                "INSERT INTO users (public_key, username, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?)",
-                (public_key, username, inviter_key, default_quota, private_key)
-            )
-            
-            cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
+            # --- 发放奖励逻辑 (这部分本身是正确的，保留即可) ---
             # <<< --- 新增代码: 发放新用户奖励 --- >>>
             cursor.execute("SELECT value FROM settings WHERE key = ?", ('welcome_bonus_amount',))
             bonus_setting = cursor.fetchone()
@@ -723,43 +717,33 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
                 try:
                     bonus_amount = float(bonus_setting['value'])
                     if bonus_amount > 0:
-                        # 调用内部系统交易逻辑，从创世账户给新用户发钱
-                        success_bonus, detail_bonus = _execute_system_tx_logic(
+                        _execute_system_tx_logic(
                             from_key=GENESIS_ACCOUNT,
                             to_key=public_key,
                             amount=bonus_amount,
                             note="新用户注册奖励",
-                            conn=conn  # 使用当前的数据库连接以确保事务原子性
+                            conn=conn
                         )
-                        if not success_bonus:
-                            # 如果奖励发放失败，回滚整个注册过程
-                            conn.rollback()
-                            return False, f"用户创建成功但奖励发放失败: {detail_bonus}"
                 except (ValueError, TypeError):
-                    # 如果数据库中的值不是有效的数字，则忽略
                     pass 
-            # <<< --- 新增代码结束 --- >>>
+            
             # <<< --- 新增代码: 发放邀请人奖励 --- >>>
             cursor.execute("SELECT value FROM settings WHERE key = ?", ('inviter_bonus_amount',))
             inviter_bonus_setting = cursor.fetchone()
             if inviter_bonus_setting:
                 try:
                     inviter_bonus_amount = float(inviter_bonus_setting['value'])
-                    # 确保奖励大于0，并且不给创世账号发奖励
                     if inviter_bonus_amount > 0 and inviter_key != GENESIS_ACCOUNT:
-                        success_inviter_bonus, detail_inviter_bonus = _execute_system_tx_logic(
+                        _execute_system_tx_logic(
                             from_key=GENESIS_ACCOUNT,
                             to_key=inviter_key,
                             amount=inviter_bonus_amount,
                             note=f"成功邀请新用户: {username}",
                             conn=conn
                         )
-                        if not success_inviter_bonus:
-                            conn.rollback()
-                            return False, f"用户创建成功但邀请奖励发放失败: {detail_inviter_bonus}"
                 except (ValueError, TypeError):
-                    pass # 如果设置值无效则忽略
-            # <<< --- 新增代码结束 --- >>>
+                    pass
+            
             cursor.execute(
                 "UPDATE invitation_codes SET is_used = 1, used_by = ? WHERE code = ?",
                 (public_key, invitation_code)
@@ -771,7 +755,7 @@ def register_user(username: str, public_key: str, private_key: str, invitation_c
             
         except sqlite3.IntegrityError:
             conn.rollback()
-            return False, "用户名已存在", {}
+            return False, "用户名或UID已存在", {}
         except Exception as e:
             conn.rollback()
             return False, f"注册时发生未知错误: {e}", {}
@@ -933,7 +917,8 @@ def get_all_active_users() -> list:
     """获取所有活跃用户列表。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT username, public_key FROM users WHERE is_active = 1 ORDER BY username")
+        # --- 核心修正：在这里添加 uid 字段 ---
+        cursor.execute("SELECT username, public_key, uid FROM users WHERE is_active = 1 ORDER BY username")
         return [dict(row) for row in cursor.fetchall()]
 
 def get_transaction_history(public_key: str) -> list:

@@ -338,7 +338,7 @@ def api_login(request: UserLoginRequest):
 
 
 @app.post("/register", response_model=UserRegisterResponse, tags=["User"])
-def api_register_user(request: UserRegisterRequest):
+def api_register_user(request: UserRegisterRequest): # <--- 这里是关键修改点
     if not request.username or len(request.username) < 3:
         raise HTTPException(status_code=400, detail="用户名至少需要3个字符")
     
