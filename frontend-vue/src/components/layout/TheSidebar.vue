@@ -4,43 +4,32 @@ import { useAuthStore } from '@/stores/auth'
 import IconWallet from '@/components/icons/IconWallet.vue'
 import IconTransfer from '@/components/icons/IconTransfer.vue'
 import IconInvite from '@/components/icons/IconInvite.vue'
-// --- 1. 导入新图标 ---
 import IconShop from '@/components/icons/IconShop.vue'
 import IconCollection from '@/components/icons/IconCollection.vue'
+// +++ 1. 导入新图标 +++
+import IconAdmin from '@/components/icons/IconAdmin.vue'
 
 
 const authStore = useAuthStore()
 const router = useRouter()
 
-// --- 2. 在 navItems 数组中添加新条目 ---
 const navItems = [
-  {
-    name: '我的钱包',
-    routeName: 'wallet',
-    icon: IconWallet,
-  },
-  {
-    name: '转账',
-    routeName: 'transfer',
-    icon: IconTransfer,
-  },
-  {
-    name: '邀请',
-    routeName: 'invitations',
-    icon: IconInvite,
-  },
-  // --- 3. 添加新条目 ---
-  {
-    name: '商店',
-    routeName: 'shop',
-    icon: IconShop,
-  },
-  {
-    name: '我的收藏',
-    routeName: 'collection',
-    icon: IconCollection,
-  },
+  { name: '我的钱包', routeName: 'wallet', icon: IconWallet },
+  { name: '转账', routeName: 'transfer', icon: IconTransfer },
+  { name: '邀请', routeName: 'invitations', icon: IconInvite },
+  { name: '商店', routeName: 'shop', icon: IconShop },
+  { name: '我的收藏', routeName: 'collection', icon: IconCollection },
 ]
+
+// +++ 2. 添加一个仅管理员可见的导航项 +++
+const adminNavItems = [
+  {
+    name: '管理员',
+    routeName: 'admin',
+    icon: IconAdmin,
+  }
+]
+
 
 async function handleLogout() {
   authStore.logout()
@@ -70,6 +59,20 @@ async function handleLogout() {
         <component :is="item.icon" class="nav-icon" />
         <span>{{ item.name }}</span>
       </RouterLink>
+
+      <template v-if="authStore.userInfo.uid === '000'">
+        <div class="nav-divider"></div>
+        <RouterLink
+          v-for="item in adminNavItems"
+          :key="item.routeName"
+          :to="{ name: item.routeName }"
+          class="nav-item admin-link"
+          active-class="is-active"
+        >
+          <component :is="item.icon" class="nav-icon" />
+          <span>{{ item.name }}</span>
+        </RouterLink>
+      </template>
     </nav>
 
     <div class="sidebar-footer">
@@ -79,6 +82,7 @@ async function handleLogout() {
 </template>
 
 <style scoped>
+/* (大部分样式保持不变) */
 .sidebar {
   width: 260px;
   background-color: #ffffff;
@@ -140,10 +144,22 @@ async function handleLogout() {
   color: white;
 }
 
+/* +++ 新增管理员链接样式 +++ */
+.nav-item.admin-link.is-active {
+    background-color: #c53030;
+}
+
 .nav-icon {
   width: 20px;
   height: 20px;
   margin-right: 1rem;
+}
+
+/* +++ 新增分隔线样式 +++ */
+.nav-divider {
+    height: 1px;
+    background-color: #e2e8f0;
+    margin: 1rem 0;
 }
 
 .sidebar-footer {

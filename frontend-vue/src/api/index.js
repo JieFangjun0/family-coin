@@ -9,15 +9,17 @@ import apiClient from './client'
  * @param {object} [options] - 可选参数
  * @param {object} [options.payload] - 请求体 (用于 POST, PUT 等)
  * @param {object} [options.params] - URL 查询参数 (用于 GET)
+ * @param {object} [options.headers] - HTTP 请求头
  * @returns {Promise<[any, string|null]>} - 返回一个元组 [data, error]
  */
-export async function apiCall(method, url, { payload = null, params = null } = {}) {
+export async function apiCall(method, url, { payload = null, params = null, headers = null } = {}) {
   try {
     const config = {
       method,
       url,
       data: payload,
       params,
+      headers, // <-- 核心修正：将 headers 添加到 config 对象中
     }
     const response = await apiClient(config)
     // 请求成功，返回 [数据, null]

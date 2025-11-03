@@ -193,3 +193,11 @@ class PlanetHandler(NFTLogicHandler):
         num_anomalies = len(data.get('anomalies', []))
         anomaly_str = f" | {num_anomalies}个未探明信号" if num_anomalies > 0 else ""
         return f"行星: {name} [稀有度: {rarity}]{anomaly_str}"
+        
+    @classmethod
+    def get_admin_mint_config(cls) -> dict:
+        """为管理员铸造表单提供帮助信息和默认数据。"""
+        return {
+            "help_text": '对于“星球”，管理员可以直接铸造。留空 {} 以完全随机，或提供 {"custom_name": "Tatooine"} 等字段覆盖。',
+            "default_json": '{\n  "custom_name": "New Earth"\n}'
+        }

@@ -15,7 +15,7 @@ from shared.crypto_utils import (
 )
 from backend import ledger
 from backend.nft_logic import get_handler, get_available_nft_types, NFT_HANDLERS
-
+from backend.nft_admin_utils import get_mint_info_for_type
 # --- Pydantic 模型定义 ---
 class UserRegisterRequest(BaseModel):
     username: str
@@ -846,75 +846,59 @@ def api_perform_shop_action(request: MarketSignedRequest):
 def api_admin_get_nft_types():
     return get_available_nft_types()
 
+@app.get("/admin/nft/mint_info/{nft_type}", tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
+def api_admin_get_nft_mint_info(nft_type: str):
+    """获取特定NFT类型的管理员铸造帮助信息和默认JSON。"""
+    info = get_mint_info_for_type(nft_type)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"未找到类型为 {nft_type} 的铸造信息。")
+    return info
+
 @app.post("/admin/nft/mint", response_model=SuccessResponse, tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
 def api_admin_mint_nft(request: AdminMintNFTRequest):
     handler = get_handler(request.nft_type)
     if not handler:
         raise HTTPException(status_code=400, detail=f"不存在的 NFT 类型: {request.nft_type}")
-
-    # 获取用户名以传递给 mint 函数
     user_details = ledger.get_user_details(request.to_key)
     if not user_details:
         raise HTTPException(status_code=404, detail="接收用户不存在")
     username = user_details.get('username')
-
     success, detail, db_data = handler.mint(request.to_key, request.data, owner_username=username)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
-
-    success, detail, nft_id = ledger.mint_nft(
-        owner_key=request.to_key,
-        nft_type=request.nft_type,
-        data=db_data
-    )
+    success, detail, nft_id = ledger.mint_nft(owner_key=request.to_key, nft_type=request.nft_type, data=db_data)
     if not success:
         raise HTTPException(status_code=500, detail=detail)
-        
     return SuccessResponse(detail=f"成功为用户 {request.to_key[:10]}... 铸造了 NFT (ID: {nft_id[:8]}...)！消息: {detail}")
 
 @app.post("/admin/issue", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_issue(request: AdminIssueRequest):
-    """(管理员) 增发货币。"""
-    success, detail = ledger.admin_issue_coins(
-        to_key=request.to_key,
-        amount=request.amount,
-        note=request.note
-    )
+    success, detail = ledger.admin_issue_coins(to_key=request.to_key, amount=request.amount, note=request.note)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
 @app.post("/admin/multi_issue", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_multi_issue(request: AdminMultiIssueRequest):
-    """(管理员) 批量增发货币。"""
-    success, detail = ledger.admin_multi_issue_coins(
-        targets=request.targets,
-        note=request.note
-    )
+    success, detail = ledger.admin_multi_issue_coins(targets=request.targets, note=request.note)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
 @app.post("/admin/burn", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_burn(request: AdminBurnRequest):
-    """(管理员) 销毁货币。"""
-    success, detail = ledger.admin_burn_coins(
-        from_key=request.from_key,
-        amount=request.amount,
-        note=request.note
-    )
+    success, detail = ledger.admin_burn_coins(from_key=request.from_key, amount=request.amount, note=request.note)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
+
 @app.get("/admin/balances", response_model=AdminBalancesResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_get_all_balances():
-    """(管理员) 监控所有用户的余额。"""
     balances = ledger.get_all_balances(include_inactive=True)
     return AdminBalancesResponse(balances=balances)
 
 @app.get("/admin/setting/{key}", tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_get_setting(key: str):
-    """(管理员) 获取单个系统设置。"""
     value = ledger.get_setting(key)
     if value is None:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found.")
@@ -922,7 +906,6 @@ def api_admin_get_setting(key: str):
 
 @app.post("/admin/set_setting", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_set_setting(request: AdminSetQuotaRequest):
-    """(管理员) 更新全局设置。"""
     success = ledger.set_setting(request.key, request.value)
     if not success:
         raise HTTPException(status_code=500, detail="更新设置失败")
@@ -930,31 +913,44 @@ def api_admin_set_setting(request: AdminSetQuotaRequest):
 
 @app.post("/admin/adjust_quota", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_adjust_user_quota(request: AdminAdjustUserQuotaRequest):
-    """(管理员) 调整特定用户的邀请额度。"""
     success, detail = ledger.admin_adjust_user_quota(request.public_key, request.new_quota)
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+# +++ 核心修正 #1：添加缺失的接口 +++
+@app.post("/admin/set_user_active_status", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_set_user_active_status(request: AdminSetUserActiveStatusRequest):
+    """(管理员功能) 启用或禁用一个用户。"""
+    success, detail = ledger.admin_set_user_active_status(request.public_key, request.is_active)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
 @app.post("/admin/reset_password", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_reset_user_password(request: AdminResetPasswordRequest):
-    """(新增, 管理员功能) 强制重置用户的密码。"""
     if not request.new_password or len(request.new_password) < 6:
         raise HTTPException(status_code=400, detail="新密码至少需要6个字符。")
-        
     success, detail = ledger.admin_reset_user_password(request.public_key, request.new_password)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@app.post("/admin/nuke_system", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
-def api_admin_nuke_system():
-    """(管理员) 彻底删除数据库并重建，返回到创世状态。"""
-    success, detail = ledger.nuke_database()
+@app.post("/admin/purge_user", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_purge_user(request: AdminPurgeUserRequest):
+    """(管理员功能) 彻底清除用户数据"""
+    success, detail = ledger.admin_purge_user(request.public_key)
     if not success:
         raise HTTPException(status_code=500, detail=detail)
     return SuccessResponse(detail=detail)
 
+
+@app.post("/admin/nuke_system", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_nuke_system():
+    success, detail = ledger.nuke_database()
+    if not success:
+        raise HTTPException(status_code=500, detail=detail)
+    return SuccessResponse(detail=detail)
 # --- 启动 (用于本地调试) ---
 if __name__ == "__main__":
     print("--- 警告：正在以调试模式启动 (非 Docker) ---")

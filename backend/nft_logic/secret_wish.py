@@ -105,7 +105,7 @@ class SecretWishHandler(NFTLogicHandler):
                     "default": 7.0,
                     "min_value": 0.001,
                     "max_value": 365.0,
-                    "step": 0.001
+                    "step": 0.001,
                 }
             ]
         }
@@ -152,3 +152,14 @@ class SecretWishHandler(NFTLogicHandler):
         except Exception as e:
             # 如果出现任何错误，返回一个安全的默认值
             return f"{data.get('description', '一个神秘的愿望')} (来自 {data.get('creator_username', '未知')})"
+    @classmethod
+    def get_admin_mint_config(cls) -> dict:
+        """为管理员铸造表单提供帮助信息和默认数据。"""
+        return {
+            "help_text": '对于“秘密”，请提供: {"description": "公开的描述", "content": "秘密内容", "destroy_in_days": 消失天数 (天)}',
+            "default_json": '''{
+  "description": "我今天中午吃了什么？",
+  "content": "丝瓜炒鸡蛋，非常美味！",
+  "destroy_in_days": 7
+}'''
+        }

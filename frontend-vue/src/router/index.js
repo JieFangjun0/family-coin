@@ -27,7 +27,6 @@ const router = createRouter({
           component: () => import('@/views/WalletView.vue'),
         },
         {
-          // 注意：子路由的 path 不应该以 '/' 开头
           path: 'transfer',
           name: 'transfer',
           component: () => import('@/views/TransferView.vue'),
@@ -37,7 +36,6 @@ const router = createRouter({
           name: 'invitations',
           component: () => import('@/views/InvitationView.vue'),
         },
-        // +++ 确保这里包含了商店和收藏的路由 +++
         {
           path: 'shop',
           name: 'shop',
@@ -48,6 +46,13 @@ const router = createRouter({
           name: 'collection',
           component: () => import('@/views/MyCollectionView.vue'),
         },
+        // +++ 新增管理员路由 +++
+        {
+          path: 'admin',
+          name: 'admin',
+          component: () => import('@/views/AdminView.vue'),
+          meta: { requiresAdmin: true }, // 添加一个 meta 字段用于权限判断
+        },
       ],
     },
 
@@ -56,8 +61,8 @@ const router = createRouter({
   ],
 })
 
-// --- 全局路由守卫 (保持不变) ---
-router.beforeEach((to, from, next) => {
+// --- 全局路由守卫 (修改) ---
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   const isLoggedIn = authStore.isLoggedIn
 
@@ -65,8 +70,25 @@ router.beforeEach((to, from, next) => {
     return next({ name: 'login' })
   }
 
+  // 如果已登录，但尝试访问公共页面（如登录页），则重定向到钱包页
   if (!to.meta.requiresAuth && isLoggedIn && to.name !== 'genesis') {
     return next({ name: 'wallet' })
+  }
+  
+  // +++ 新增管理员权限检查 +++
+  if (to.meta.requiresAdmin) {
+    // 确保在检查 isAdmin 之前用户信息已加载
+    if (!authStore.userInfo.uid) {
+      // 这是一个边缘情况，如果直接访问/admin页面，可能需要等待用户信息加载
+      // 但在我们的应用流中，用户总是先登录，所以通常不会发生
+      await authStore.fetchUserDetails(); // 假设 authStore 有这个方法
+    }
+    
+    // 创世用户的 UID 是 '000'
+    if (authStore.userInfo.uid !== '000') {
+      // 如果不是管理员，重定向到钱包首页
+      return next({ name: 'wallet' });
+    }
   }
   
   next()
