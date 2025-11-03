@@ -6,7 +6,9 @@ import IconTransfer from '@/components/icons/IconTransfer.vue'
 import IconInvite from '@/components/icons/IconInvite.vue'
 import IconShop from '@/components/icons/IconShop.vue'
 import IconCollection from '@/components/icons/IconCollection.vue'
-// +++ 1. 导入新图标 +++
+import IconCommunity from '@/components/icons/IconCommunity.vue'
+import IconFriends from '@/components/icons/IconFriends.vue'
+import IconProfile from '@/components/icons/IconProfile.vue'
 import IconAdmin from '@/components/icons/IconAdmin.vue'
 
 
@@ -18,7 +20,10 @@ const navItems = [
   { name: '转账', routeName: 'transfer', icon: IconTransfer },
   { name: '邀请', routeName: 'invitations', icon: IconInvite },
   { name: '商店', routeName: 'shop', icon: IconShop },
-  { name: '我的收藏', routeName: 'collection', icon: IconCollection },
+  { name: '我的NFT', routeName: 'collection', icon: IconCollection },
+  { name: '社区', routeName: 'community', icon: IconCommunity },
+  { name: '好友', routeName: 'friends', icon: IconFriends },
+  { name: '个人展示主页', routeName: 'profile', icon: IconProfile }, // <-- 修改
 ]
 
 // +++ 2. 添加一个仅管理员可见的导航项 +++

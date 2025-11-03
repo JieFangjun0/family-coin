@@ -6,6 +6,11 @@ const props = defineProps({
   nft: {
     type: Object,
     required: true
+  },
+  // 核心修正：确保 context 属性被接收
+  context: {
+    type: String,
+    default: 'collection' // 'collection', 'market', 'profile'
   }
 })
 
@@ -28,6 +33,7 @@ function onAction(action, payload) {
     <component 
       :is="rendererComponent" 
       :nft="nft" 
+      :context="context"
       @action="onAction" 
     />
   </div>

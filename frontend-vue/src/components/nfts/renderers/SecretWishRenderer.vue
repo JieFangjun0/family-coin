@@ -1,5 +1,6 @@
 <script setup>
 import { reactive, computed, ref, onUnmounted, onMounted } from 'vue'
+import { formatTimestamp } from '@/utils/formatters'
 
 const props = defineProps({
   nft: { type: Object, required: true },
@@ -17,7 +18,6 @@ const now = ref(Date.now() / 1000)
 let timer;
 
 onMounted(() => {
-  // 每秒更新一次时间，用于倒计时
   timer = setInterval(() => {
     now.value = Date.now() / 1000
   }, 1000)
@@ -69,7 +69,11 @@ function handleDestroy() {
     <ul class="nft-data" v-if="nft.data">
         <li><strong>ID:</strong> <code>{{ nft.nft_id?.substring(0, 8) }}...</code></li>
         <li><strong>创建者:</strong> {{ nft.data.creator_username || 'N/A' }}</li>
+        
         <li v-if="context === 'collection' && !isExpired"><strong>秘密内容:</strong> <code>{{ nft.data.content || 'N/A' }}</code></li>
+        <li v-else-if="!isExpired"><strong>秘密内容:</strong> <code>[仅所有者可见]</code></li>
+
+
         <li class="countdown"><strong>⏳ {{ isExpired ? '已于' : '剩余' }}:</strong> {{ isExpired ? formatTimestamp(nft.data.destroy_timestamp) : countdownStr }}</li>
     </ul>
     <div v-else class="nft-data-error">[数据加载失败]</div>

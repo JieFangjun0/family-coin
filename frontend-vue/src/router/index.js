@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
-// 导入视图组件
 import MainLayout from '@/layouts/MainLayout.vue'
 import LoginView from '@/views/LoginView.vue'
 import RegisterView from '@/views/RegisterView.vue'
@@ -22,7 +21,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
       children: [
         {
-          path: '', // 默认子路由
+          path: '',
           name: 'wallet',
           component: () => import('@/views/WalletView.vue'),
         },
@@ -46,12 +45,27 @@ const router = createRouter({
           name: 'collection',
           component: () => import('@/views/MyCollectionView.vue'),
         },
-        // +++ 新增管理员路由 +++
+        {
+          // 核心修正：路径中添加了 :uid 参数
+          path: 'community/:uid?',
+          name: 'community',
+          component: () => import('@/views/CommunityView.vue'),
+        },
+        {
+          path: 'friends',
+          name: 'friends',
+          component: () => import('@/views/FriendsView.vue'),
+        },
+        {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('@/views/ProfileView.vue'),
+        },
         {
           path: 'admin',
           name: 'admin',
           component: () => import('@/views/AdminView.vue'),
-          meta: { requiresAdmin: true }, // 添加一个 meta 字段用于权限判断
+          meta: { requiresAdmin: true },
         },
       ],
     },
@@ -61,7 +75,7 @@ const router = createRouter({
   ],
 })
 
-// --- 全局路由守卫 (修改) ---
+// --- 全局路由守卫 ---
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   const isLoggedIn = authStore.isLoggedIn
@@ -70,23 +84,13 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'login' })
   }
 
-  // 如果已登录，但尝试访问公共页面（如登录页），则重定向到钱包页
   if (!to.meta.requiresAuth && isLoggedIn && to.name !== 'genesis') {
     return next({ name: 'wallet' })
   }
   
-  // +++ 新增管理员权限检查 +++
   if (to.meta.requiresAdmin) {
-    // 确保在检查 isAdmin 之前用户信息已加载
-    if (!authStore.userInfo.uid) {
-      // 这是一个边缘情况，如果直接访问/admin页面，可能需要等待用户信息加载
-      // 但在我们的应用流中，用户总是先登录，所以通常不会发生
-      await authStore.fetchUserDetails(); // 假设 authStore 有这个方法
-    }
-    
     // 创世用户的 UID 是 '000'
     if (authStore.userInfo.uid !== '000') {
-      // 如果不是管理员，重定向到钱包首页
       return next({ name: 'wallet' });
     }
   }

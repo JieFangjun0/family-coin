@@ -6,6 +6,7 @@ import { createSignedPayload } from '@/utils/crypto'
 import { formatTimestamp, formatCurrency } from '@/utils/formatters'
 import BalanceCard from '@/components/wallet/BalanceCard.vue'
 import MarketNftDetail from '@/components/nfts/MarketNftDetail.vue'
+import ClickableUsername from '@/components/global/ClickableUsername.vue' // 引入组件
 
 const authStore = useAuthStore()
 
@@ -31,26 +32,22 @@ const sortedMyListings = computed(() => {
   return [...myActivity.value.listings].sort((a, b) => {
     if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1
     if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1
-    // 按创建时间降序排列
     return b.created_at - a.created_at
   })
 })
-
-// --- 数据获取方法 ---
 
 async function fetchDataForTab(tab) {
   errorMessage.value = null;
   successMessage.value = null;
   switch (tab) {
     case 'mint':
-      // 只有在从未加载过的情况下才加载
       if (Object.keys(creatableNfts.value).length === 0) await fetchCreatableNfts();
       break;
     case 'buy':
-      await fetchSaleListings(); // 每次都刷新以获取最新市场信息
+      await fetchSaleListings();
       break;
     case 'my-listings':
-      await fetchMyActivity(); // 每次都刷新
+      await fetchMyActivity();
       break;
   }
 }
@@ -75,7 +72,6 @@ async function fetchCreatableNfts() {
     errorMessage.value = `无法加载可铸造物品: ${error}`
   } else {
     creatableNfts.value = data
-    // 为每个可铸造的NFT初始化表单对象
     for (const nftType in data) {
       mintForms.value[nftType] = {}
       if (data[nftType].fields) {
@@ -114,8 +110,6 @@ async function fetchMyActivity() {
   isLoading.value.myListings = false
 }
 
-// --- 操作方法 ---
-
 async function handleMintNft(nftType, config) {
   successMessage.value = null
   errorMessage.value = null
@@ -146,7 +140,7 @@ async function handleMintNft(nftType, config) {
     errorMessage.value = `操作失败: ${error}`
   } else {
     successMessage.value = data.detail
-    await fetchBalance() // 刷新余额
+    await fetchBalance()
   }
 }
 
@@ -201,14 +195,11 @@ async function handleCancelListing(listingId) {
   }
 }
 
-
-// --- Tab 切换 ---
 function selectTab(tab) {
   activeTab.value = tab
   fetchDataForTab(tab)
 }
 
-// --- 格式化辅助 ---
 const LISTING_TYPE_MAP = { "SALE": "一口价", "AUCTION": "拍卖", "SEEK": "求购" }
 const STATUS_MAP = { "ACTIVE": "进行中", "PENDING": "待处理", "COMPLETED": "已完成", "CANCELLED": "已取消", "REJECTED": "已拒绝", "EXPIRED": "已过期", "SOLD": "已售出", "FULFILLED": "已成交" }
 
@@ -217,7 +208,7 @@ function translateStatus(status) { return STATUS_MAP[status] || status }
 
 onMounted(() => {
   fetchBalance()
-  selectTab('mint') // 默认加载第一个tab
+  selectTab('mint')
 })
 </script>
 
@@ -297,7 +288,10 @@ onMounted(() => {
           </template>
 
           <ul class="nft-data">
-            <li><strong>卖家:</strong> {{ item.lister_username }} <span v-if="item.lister_key === authStore.userInfo.publicKey">(这是你)</span></li>
+            <li><strong>卖家:</strong> 
+                <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
+                <span v-if="item.lister_key === authStore.userInfo.publicKey"> (这是你)</span>
+            </li>
             <li><strong>上架于:</strong> {{ formatTimestamp(item.created_at) }}</li>
           </ul>
 
@@ -337,29 +331,14 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* (大部分样式保持不变) */
 .shop-view { max-width: 1200px; margin: 0 auto; }
 .view-header h1 { font-size: 2rem; font-weight: 700; color: #2d3748; }
 .subtitle { color: #718096; margin-bottom: 1.5rem; }
 .balance-display { margin-bottom: 2rem; max-width: 350px; }
-
-/* 修复：Tab按钮样式 */
 .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid #e2e8f0; }
-.tabs button {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  background: none;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #718096;
-  cursor: pointer;
-  border-bottom: 4px solid transparent;
-  transform: translateY(2px);
-  transition: color 0.2s, border-color 0.2s;
-}
+.tabs button { padding: 0.75rem 1.5rem; border: none; background: none; font-size: 1rem; font-weight: 600; color: #718096; cursor: pointer; border-bottom: 4px solid transparent; transform: translateY(2px); transition: color 0.2s, border-color 0.2s; }
 .tabs button:hover { color: #4a5568; }
 .tabs button.active { color: #42b883; border-bottom-color: #42b883; }
-
 .loading-state, .empty-state { text-align: center; padding: 3rem; color: #718096; font-size: 1.1rem; }
 .nft-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem; }
 .nft-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); display: flex; flex-direction: column; transition: opacity 0.3s; }
@@ -384,8 +363,6 @@ button:disabled { background-color: #a0aec0; cursor: not-allowed; }
 .message { padding: 1rem; border-radius: 4px; text-align: center; font-weight: 500; margin-bottom: 1rem;}
 .success { color: #155724; background-color: #d4edda; }
 .error { color: #d8000c; background-color: #ffbaba; }
-
-/* 修复：“我的挂单”状态样式 */
 .my-listing-card .status-text { font-weight: bold; }
 .my-listing-card.status-active .status-text { color: #2f855a; }
 .my-listing-card:not(.status-active) { opacity: 0.6; }
