@@ -1,3 +1,5 @@
+// family-coin-vue-refactor/frontend-vue/src/views/LoginView.vue
+
 <script setup>
 import { ref, onBeforeMount } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
@@ -7,40 +9,33 @@ import { apiCall } from '@/api'
 const router = useRouter()
 const authStore = useAuthStore()
 
-// --- State ---
-const isCheckingStatus = ref(true) // 新增：用于在检查期间显示加载状态
+const isCheckingStatus = ref(true)
 const usernameOrUid = ref('')
 const password = ref('')
 const errorMessage = ref(null)
 const isLoading = ref(false)
 
-/**
- * 在组件挂载到 DOM 前执行。
- * 这是执行重定向或权限检查的理想位置。
- */
 onBeforeMount(async () => {
   const [data, error] = await apiCall('GET', '/status')
 
   if (error) {
-    // 如果无法连接后端，显示一个错误，而不是白屏
     errorMessage.value = `严重错误：无法获取系统状态。请检查后端服务。 ${error}`
-    isCheckingStatus.value = false // 停止加载，以显示错误信息
+    isCheckingStatus.value = false
     return
   }
 
-  // 核心逻辑：根据后端返回的状态决定下一步操作
   if (data.needs_setup) {
-    // 如果需要初始化，立即替换当前路由到创世页面
-    // 使用 replace 是为了防止用户通过浏览器“后退”按钮回到这个中间状态
+    // --- 核心修复 ---
+    // 1. 静默登出，清除本地可能存在的无效登录状态
+    authStore.logout(false) 
+    // 2. 然后再安全地跳转到创世页面
     await router.replace({ name: 'genesis' })
   } else {
-    // 如果系统已设置好，则结束加载状态，正常显示登录表单
     isCheckingStatus.value = false
   }
 })
 
 async function handleLogin() {
-  // 登录逻辑保持不变...
   if (!usernameOrUid.value || !password.value) {
     errorMessage.value = '用户名/UID和密码不能为空。'
     return
@@ -87,13 +82,11 @@ async function handleLogin() {
 </template>
 
 <style scoped>
-/* 样式保持不变，但新增 loading-container 的样式 */
 .loading-container { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; }
 .spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: #42b883; animation: spin 1s ease infinite; }
 .loading-container p { margin-top: 1rem; color: #718096; font-weight: 500; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-/* ... 其他样式 ... */
 .login-container { max-width: 400px; margin: 10vh auto; padding: 2rem 2.5rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background-color: #fff; }
 .subtitle { text-align: center; color: #666; margin-bottom: 2rem; }
 .login-form { display: flex; flex-direction: column; gap: 1.25rem; }

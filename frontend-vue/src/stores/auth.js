@@ -1,9 +1,10 @@
+// family-coin-vue-refactor/frontend-vue/src/stores/auth.js
+
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue' // <-- 新增 watch
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiCall, setLogoutHandler } from '@/api'
 
-// 我们将用户信息存储在 localStorage 中，以便在刷新页面后保持登录状态
 const usePersistentState = (key, defaultValue) => {
   const state = ref(JSON.parse(localStorage.getItem(key)) ?? defaultValue)
 
@@ -22,7 +23,6 @@ const usePersistentState = (key, defaultValue) => {
 export const useAuthStore = defineStore('auth', () => {
   const router = useRouter()
 
-  // --- State ---
   const userInfo = usePersistentState('family-coin-user', {
     publicKey: '',
     privateKey: '',
@@ -30,17 +30,8 @@ export const useAuthStore = defineStore('auth', () => {
     uid: '',
   })
 
-  // --- Getters ---
   const isLoggedIn = computed(() => !!userInfo.value?.publicKey && !!userInfo.value?.privateKey)
 
-  // --- Actions ---
-
-  /**
-   * 处理用户登录
-   * @param {string} usernameOrUid
-   * @param {string} password
-   * @returns {Promise<string|null>} - 成功则返回 null，失败则返回错误信息
-   */
   async function login(usernameOrUid, password) {
     const [data, error] = await apiCall('POST', '/login', {
       payload: {
@@ -68,27 +59,27 @@ export const useAuthStore = defineStore('auth', () => {
 
   /**
    * 处理用户登出
+   * @param {boolean} [shouldRedirect=true] - 是否在登出后跳转到登录页
    */
-  function logout() {
+  function logout(shouldRedirect = true) {
     userInfo.value = {
       publicKey: '',
       privateKey: '',
       username: '',
       uid: '',
     }
-    // 清除 localStorage
     localStorage.removeItem('family-coin-user')
-    // 跳转到登录页
-    router.push({ name: 'login' })
+
+    // 只有在需要时才执行跳转
+    if (shouldRedirect) {
+      router.push({ name: 'login' })
+    }
   }
 
 
   return {
-    // state
     userInfo,
-    // getters
     isLoggedIn,
-    // actions
     login,
     logout,
   }
