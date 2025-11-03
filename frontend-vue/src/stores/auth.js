@@ -2,9 +2,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-// --- 1. 彻底移除 useRouter 的导入 ---
-// import { useRouter } from 'vue-router' 
-import { apiCall, setLogoutHandler } from '@/api'
+import { apiCall} from '@/api'
 
 const usePersistentState = (key, defaultValue) => {
   const state = ref(JSON.parse(localStorage.getItem(key)) ?? defaultValue)

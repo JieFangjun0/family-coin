@@ -1,66 +1,79 @@
-import axios from 'axios'
 
-let triggerLogout;
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
-/**
- * 设置一个全局的登出处理器。
- * @param {Function} handler - 当触发401时调用的函数
- */
-export function setLogoutHandler(handler) {
-  triggerLogout = handler;
-}
+// 导入视图组件
+import MainLayout from '@/layouts/MainLayout.vue'
+import LoginView from '@/views/LoginView.vue'
+import RegisterView from '@/views/RegisterView.vue'
+import GenesisView from '@/views/GenesisView.vue'
 
-const apiClient = axios.create({
-  baseURL: '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 15000,
-});
+const router = createRouter({
+  history: createWebHistory(import.meta.env.BASE_URL),
+  routes: [
+    // --- 访客路由 ---
+    { path: '/login', name: 'login', component: LoginView },
+    { path: '/register', name: 'register', component: RegisterView },
+    { path: '/genesis', name: 'genesis', component: GenesisView },
 
-// Axios 响应拦截器
-apiClient.interceptors.response.use(
-  (response) => response, // 对成功的响应直接放行
-  (error) => {
-    // 只在 401 Unauthorized 时触发自动登出
-    if (error.response && error.response.status === 401) {
-      if (triggerLogout) {
-        console.warn('Authentication error (401) detected. Triggering auto-logout.');
-        triggerLogout();
-      }
-    }
-    // 无论如何，都将错误继续向下传递
-    return Promise.reject(error);
+    // --- 需要认证的主应用布局 ---
+    {
+      path: '/',
+      component: MainLayout,
+      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '', // 默认子路由
+          name: 'wallet',
+          component: () => import('@/views/WalletView.vue'),
+        },
+        {
+          path: 'transfer', // 注意这里我移除了开头的 '/'
+          name: 'transfer',
+          component: () => import('@/views/TransferView.vue'),
+        },
+        {
+          path: 'invitations', // 注意这里我移除了开头的 '/'
+          name: 'invitations',
+          component: () => import('@/views/InvitationView.vue'),
+        },
+        // --- 在这里添加缺失的路由 ---
+        {
+          path: 'shop', // 定义 URL 路径 (作为 /shop)
+          name: 'shop',  // 路由名称，与 TheSidebar.vue 中对应
+          component: () => import('@/views/ShopView.vue'), // 指向你的 ShopView 组件
+        },
+        {
+          path: 'collection', // 定义 URL 路径 (作为 /collection)
+          name: 'collection', // 路由名称，与 TheSidebar.vue 中对应
+          component: () => import('@/views/MyCollectionView.vue'), // 指向你的 MyCollectionView 组件
+        },
+        // -------------------------
+      ],
+    },
+
+    // --- 404 捕获路由 ---
+    { path: '/:pathMatch(.*)*', redirect: '/' },
+  ],
+})
+
+// --- 全局路由守卫 (保持不变) ---
+router.beforeEach((to, from, next) => {
+  const authStore = useAuthStore()
+  const isLoggedIn = authStore.isLoggedIn
+
+  // 场景1: 目标路由需要认证，但用户未登录 -> 跳转到登录页
+  if (to.meta.requiresAuth && !isLoggedIn) {
+    return next({ name: 'login' })
   }
-);
 
-/**
- * 统一的 API 请求函数。
- * @param {string} method - 'GET', 'POST', 'PUT', 'DELETE'
- * @param {string} endpoint - API 路径 (e.g., '/login')
- * @param {object} [options] - 包含 payload, headers, params 的对象
- * @returns {Promise<[object, string|null]>} - 返回 [data, error] 数组
- */
-export async function apiCall(method, endpoint, { payload = null, headers = null, params = null } = {}) {
-  try {
-    const config = { method, url: endpoint, data: payload, headers, params };
-    const response = await apiClient(config);
-    return [response.data, null];
-  } catch (error) {
-    if (error.response) {
-      // 后端返回了具体的错误信息
-      const errorMessage = error.response.data?.detail || `请求错误，状态码：${error.response.status}`;
-      return [null, errorMessage];
-    } else if (error.request) {
-      // 请求已发出，但没有收到响应
-      return [null, '无法连接到服务器，请检查你的网络或联系管理员。'];
-    } else {
-      // 设置请求时触发了错误
-      return [null, `请求失败: ${error.message}`];
-    }
+  // 场景2: 用户已登录，但想访问访客页面 (如登录页) -> 跳转到钱包主页
+  if (!to.meta.requiresAuth && isLoggedIn && to.name !== 'genesis') { // 允许已登录用户访问 genesis (虽然一般不会)
+    return next({ name: 'wallet' })
   }
-}
+  
+  // 其他所有情况 -> 放行
+  next()
+})
 
-// 默认导出 axios 实例，以便在其他地方需要时直接使用
-export default apiClient;
-
+export default router

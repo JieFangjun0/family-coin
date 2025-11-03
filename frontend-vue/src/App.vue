@@ -1,6 +1,7 @@
 <script setup>
 import { useAuthStore } from '@/stores/auth';
-import { setLogoutHandler } from '@/api';
+// 从新的 client.js 导入
+import { setLogoutHandler } from '@/api/client';
 
 // 获取 auth store 实例
 const authStore = useAuthStore();
