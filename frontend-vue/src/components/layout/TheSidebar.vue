@@ -1,20 +1,113 @@
 <script setup>
-import { useAuthStore } from '@/stores/auth'
-import { RouterLink } from 'vue-router'
-import IconWallet from '@/components/icons/IconWallet.vue'
-// 在后续步骤中，我们将在这里导入更多图标
-// import IconTransfer from '@/components/icons/IconTransfer.vue'
+import { ref, onMounted } from 'vue';
+import { useAuthStore } from '@/stores/auth';
+import { apiCall } from '@/api';
+import { createSignedPayload } from '@/utils/crypto'; // <--- 1. 导入新的加密工具
+import BalanceCard from '@/components/wallet/BalanceCard.vue';
+import { formatCurrency } from '@/utils/formatters';
 
-const authStore = useAuthStore()
+const authStore = useAuthStore();
 
-const navItems = [
-  { name: '我的钱包', routeName: 'wallet', icon: IconWallet },
-  // 更多导航项将在这里添加
-]
+// --- Reactive State ---
+const balance = ref(0);
+const friends = ref([]);
+const isLoading = ref(true);
+const isSubmitting = ref(false);
+const errorMessage = ref(null);
+const successMessage = ref(null);
 
-function handleLogout() {
-  authStore.logout()
+// Form State
+const form = ref({
+  recipientKey: '',
+  amount: 0.01,
+  note: ''
+});
+
+// --- Data Fetching ---
+async function fetchData() {
+  // ... (这部分函数保持不变)
+  isLoading.value = true;
+  errorMessage.value = null;
+
+  const [balanceResult, friendsResult] = await Promise.all([
+    apiCall('GET', '/balance', { params: { public_key: authStore.userInfo.publicKey } }),
+    apiCall('GET', '/friends/list', { params: { public_key: authStore.userInfo.publicKey } })
+  ]);
+
+  const [balanceData, balanceError] = balanceResult;
+  if (balanceError) {
+    errorMessage.value = `无法获取余额: ${balanceError}`;
+  } else {
+    balance.value = balanceData?.balance ?? 0;
+  }
+
+  const [friendsData, friendsError] = friendsResult;
+  if (friendsError) {
+    errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + `无法获取好友列表: ${friendsError}`;
+  } else {
+    friends.value = friendsData?.friends ?? [];
+  }
+
+  isLoading.value = false;
 }
+
+// --- Methods ---
+async function handleTransfer() { // <--- 2. 完整替换 handleTransfer 函数
+  if (form.value.amount <= 0) {
+    errorMessage.value = '转账金额必须大于 0。';
+    return;
+  }
+  if (!form.value.recipientKey) {
+    errorMessage.value = '请选择或输入一个收款人。';
+    return;
+  }
+  if (form.value.amount > balance.value) {
+    errorMessage.value = '你的余额不足。';
+    return;
+  }
+
+  isSubmitting.value = true;
+  errorMessage.value = null;
+  successMessage.value = null;
+
+  // 准备要签名的消息
+  const message = {
+    from_key: authStore.userInfo.publicKey,
+    to_key: form.value.recipientKey,
+    amount: form.value.amount,
+    note: form.value.note,
+    timestamp: Date.now() / 1000 // 后端需要秒级时间戳
+  };
+  
+  // 使用我们的加密工具创建签名载荷
+  const signedPayload = await createSignedPayload(authStore.userInfo.privateKey, message);
+  
+  if (!signedPayload) {
+    errorMessage.value = '创建交易签名失败，请检查控制台错误。';
+    isSubmitting.value = false;
+    return;
+  }
+
+  // 发送带有有效签名的API请求
+  const [, error] = await apiCall('POST', '/transaction', { payload: signedPayload });
+
+  if (error) {
+    errorMessage.value = `转账失败: ${error}`;
+  } else {
+    const recipientName = friends.value.find(f => f.public_key === form.value.recipientKey)?.username || `公钥 ${form.value.recipientKey.substring(0, 15)}...`;
+    successMessage.value = `成功向 ${recipientName} 转账 ${formatCurrency(form.value.amount)} FC！`;
+    // 重置表单并刷新数据
+    form.value.recipientKey = '';
+    form.value.amount = 0.01;
+    form.value.note = '';
+    await fetchData(); // 刷新余额
+  }
+
+  isSubmitting.value = false;
+}
+
+// --- Lifecycle Hook ---
+onMounted(fetchData);
 </script>
 
 <template>

@@ -2,7 +2,8 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+// --- 1. 彻底移除 useRouter 的导入 ---
+// import { useRouter } from 'vue-router' 
 import { apiCall, setLogoutHandler } from '@/api'
 
 const usePersistentState = (key, defaultValue) => {
@@ -19,10 +20,7 @@ const usePersistentState = (key, defaultValue) => {
   return state
 }
 
-
 export const useAuthStore = defineStore('auth', () => {
-  const router = useRouter()
-
   const userInfo = usePersistentState('family-coin-user', {
     publicKey: '',
     privateKey: '',
@@ -57,11 +55,8 @@ export const useAuthStore = defineStore('auth', () => {
     return '发生未知错误'
   }
 
-  /**
-   * 处理用户登出
-   * @param {boolean} [shouldRedirect=true] - 是否在登出后跳转到登录页
-   */
-  function logout(shouldRedirect = true) {
+  // --- 2. 简化 logout 函数，移除所有路由相关代码 ---
+  function logout() {
     userInfo.value = {
       publicKey: '',
       privateKey: '',
@@ -69,11 +64,7 @@ export const useAuthStore = defineStore('auth', () => {
       uid: '',
     }
     localStorage.removeItem('family-coin-user')
-
-    // 只有在需要时才执行跳转
-    if (shouldRedirect) {
-      router.push({ name: 'login' })
-    }
+    // 注意：这里不再有任何 router.push 的调用
   }
 
 

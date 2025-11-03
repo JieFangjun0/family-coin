@@ -14,20 +14,17 @@ services:
     networks:
       - familycoin-net
 
-  # 2. 前端服务 (Vite 开发模式)
+# 2. 前端服务 (Vite 开发模式)
   frontend:
-    image: node:20-alpine
+    image: node:24-alpine
     container_name: familycoin-frontend-vue-dev
     working_dir: /app
-    # 【核心修正】在启动开发服务器前，先运行 npm install
-    command: sh -c "npm install && npm run dev"
+    # 【核心修正】将 "npm install" 替换为更可靠的 "npm ci"
+    command: sh -c "npm ci && npm run dev"
     ports:
       - "8501:5173"
     volumes:
-      # 挂载本地代码以实现热重载
       - ./frontend-vue:/app
-      # 【核心修正】使用匿名卷将容器内的 node_modules 目录独立出来，
-      # 防止被本地的 node_modules 覆盖。
       - /app/node_modules
     networks:
       - familycoin-net
