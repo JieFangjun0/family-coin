@@ -7,4 +7,4 @@ qrcode[pil]
 pandas
 pydantic
 pytz
-werkzeug
+werkzeug<3.0

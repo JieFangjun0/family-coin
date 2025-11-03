@@ -105,7 +105,7 @@ class SecretWishHandler(NFTLogicHandler):
                     "default": 7.0,
                     "min_value": 0.001,
                     "max_value": 365.0,
-                    "step": 0.5
+                    "step": 0.001
                 }
             ]
         }

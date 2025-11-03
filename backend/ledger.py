@@ -590,18 +590,46 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             conn.rollback()
             return False, f"处理报价失败: {e}"
         
+好的，你提出的这些问题非常具体，都是很关键的体验优化点。根据你的截图和描述，我们来逐一击破。
+
+问题可以分为两类：
+
+数据问题：“铸造工坊”和“我的挂单”没内容，“上架于”显示N/A。
+
+UI/UX问题：Tab按钮和“浏览市场”的卡片布局不好看。
+
+我将提供一个后端文件修改和一个前端文件修改来一次性解决所有这些问题。
+
+1. 后端修复：“上架于: N/A” 的时间Bug
+这个bug的根源在于后端 ledger.py 在查询市场列表时，没有将数据库中的时间戳字符串转换为JS友好的Unix时间戳数字。
+
+请修改 backend/ledger.py 文件：
+
+找到 get_market_listings 函数，在 SELECT 语句中为 created_at 字段添加一个 CAST 转换。
+
+Python
+
+# backend/ledger.py
+
 def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
     """获取市场上的所有挂单。"""
     resolve_finished_auctions()
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        # VVVVVV  修改下面这个查询语句  VVVVVV
         query = """
-            SELECT l.*, u.username as lister_username, u.uid as lister_uid, n.data as nft_data
+            SELECT 
+                l.*, 
+                u.username as lister_username, 
+                u.uid as lister_uid, 
+                n.data as nft_data,
+                CAST(strftime('%s', l.created_at) AS REAL) as created_at
             FROM market_listings l
             JOIN users u ON l.lister_key = u.public_key
             LEFT JOIN nfts n ON l.nft_id = n.nft_id
             WHERE l.listing_type = ? AND l.status = 'ACTIVE'
         """
+        # ^^^^^^  修改上面这个查询语句  ^^^^^^
         params = [listing_type]
         if exclude_owner:
             query += " AND l.lister_key != ?"
@@ -614,7 +642,20 @@ def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
             row_dict = dict(row)
             if row_dict.get('nft_data'):
                 row_dict['nft_data'] = json.loads(row_dict['nft_data'])
-            results.append(row_dict)
+            # ... 后续代码不变 ...
+            # 为每个挂单添加动态描述的逻辑也保持不变
+            item = row_dict # 使用 item 变量以匹配后续代码
+            if item.get('nft_data'):
+                nft_type = item.get('nft_type')
+                handler = get_handler(nft_type)
+                if handler:
+                    temp_nft_for_desc = {"data": item['nft_data'], "nft_type": nft_type}
+                    item['trade_description'] = handler.get_trade_description(temp_nft_for_desc)
+                else:
+                    item['trade_description'] = item['description']
+            else:
+                item['trade_description'] = item['description']
+            results.append(item)
         return results
 
 def get_listing_details(listing_id: str) -> dict:
