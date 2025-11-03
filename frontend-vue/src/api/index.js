@@ -18,17 +18,10 @@ const apiClient = axios.create({
 apiClient.interceptors.response.use(
   (response) => response, // 对成功的响应直接放行
   (error) => {
-    // 检查是否是需要自动登出的特定错误
-    if (error.response && [401, 403, 404].includes(error.response.status)) {
-      // 检查错误信息是否与用户认证有关
-      const detail = error.response.data?.detail?.toLowerCase() || '';
-      const isAuthError = detail.includes('签名无效') || 
-                          detail.includes('未找到用户') || 
-                          detail.includes('not found') ||
-                          detail.includes('unauthorized');
-
-      if (isAuthError && triggerLogout) {
-        console.warn('Authentication error detected. Triggering auto-logout.');
+    // --- 核心修改：只在 401 Unauthorized 时触发自动登出 ---
+    if (error.response && error.response.status === 401) {
+      if (triggerLogout) {
+        console.warn('Authentication error (401) detected. Triggering auto-logout.');
         triggerLogout();
       }
     }

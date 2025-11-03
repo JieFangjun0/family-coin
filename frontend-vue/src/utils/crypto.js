@@ -1,8 +1,12 @@
-import nacl from 'tweetnacl';
+import * as ed25519 from '@noble/ed25519';
+// --- 最终修正：从正确的子模块 '@noble/hashes/sha2' 导入 sha512 ---
+import { sha512 } from '@noble/hashes/sha2';
+
+// 将 sha512 哈希函数 "注入" 到 ed25519 库中
+ed25519.utils.sha512 = sha512;
 
 /**
  * Encodes a string into a Uint8Array using UTF-8.
- * A necessary replacement for the problematic noble library utils.
  * @param {string} str The string to encode.
  * @returns {Uint8Array}
  */
@@ -30,11 +34,10 @@ function bytesToBase64(bytes) {
   return btoa(binString);
 }
 
-
 /**
- * Parses a PEM-formatted Ed25519 private key.
+ * Parses a PEM-formatted Ed25519 private key (PKCS#8).
  * @param {string} pem The PEM string.
- * @returns {Uint8Array} The raw 64-byte key pair (seed + public key).
+ * @returns {Uint8Array} The raw 32-byte private key (seed).
  */
 function privateKeyFromPem(pem) {
   const pemContents = pem
@@ -43,31 +46,36 @@ function privateKeyFromPem(pem) {
     .replace(/\s/g, '');
 
   const buffer = base64ToBytes(pemContents);
+  const privateKeyBytes = buffer.slice(-32);
+
+  if (privateKeyBytes.length !== 32) {
+    throw new Error('Failed to parse PEM: private key is not 32 bytes long.');
+  }
   
-  // For Ed25519 in PKCS8 format, the raw private key (seed) is the last 32 bytes.
-  // tweetnacl expects a 64-byte keypair, which can be generated from the 32-byte seed.
-  const seed = buffer.slice(-32);
-  return nacl.sign.keyPair.fromSeed(seed).secretKey;
+  return privateKeyBytes;
 }
 
 /**
  * Creates a signed payload for a given message object.
  * @param {string} privateKeyPem The user's private key in PEM format.
  * @param {object} message The message object to sign.
- * @returns {{message_json: string, signature: string}|null}
+ * @returns {Promise<{message_json: string, signature: string}|null>}
  */
-export function createSignedPayload(privateKeyPem, message) {
+export async function createSignedPayload(privateKeyPem, message) {
   try {
-    const secretKey = privateKeyFromPem(privateKeyPem);
+    const privateKey = privateKeyFromPem(privateKeyPem);
 
-    // IMPORTANT: Create a canonical JSON string, same as the Python backend.
-    const messageJson = JSON.stringify(message, Object.keys(message).sort());
+    const sortedMessage = Object.keys(message)
+      .sort()
+      .reduce((obj, key) => {
+        obj[key] = message[key];
+        return obj;
+      }, {});
+    const messageJson = JSON.stringify(sortedMessage);
     const messageBytes = utf8ToBytes(messageJson);
 
-    // Sign the message bytes
-    const signatureBytes = nacl.sign.detached(messageBytes, secretKey);
+    const signatureBytes = await ed25519.sign(messageBytes, privateKey);
 
-    // Encode signature to Base64
     const signatureBase64 = bytesToBase64(signatureBytes);
 
     return {

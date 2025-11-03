@@ -27,6 +27,11 @@ const router = createRouter({
           name: 'transfer',
           component: () => import('@/views/TransferView.vue'),
         },
+        {
+          path: '/invitations',
+          name: 'invitations',
+          component: () => import('@/views/InvitationView.vue'),
+        },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

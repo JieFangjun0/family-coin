@@ -490,8 +490,10 @@ def api_generate_invitation(request: MarketSignedRequest):
 
 @app.get("/user/my_invitations", response_model=InvitationCodeListResponse, tags=["User"])
 def api_get_my_invitations(public_key: str):
-    if not public_key or "PUBLIC KEY" not in public_key:
-         raise HTTPException(status_code=400, detail="无效的公钥格式")
+    # --- 将这部分修改为如下 ---
+    if not public_key:
+         raise HTTPException(status_code=400, detail="必须提供有效的公钥")
+    # --- 修改结束 ---
          
     codes = ledger.get_my_invitation_codes(public_key)
     return InvitationCodeListResponse(codes=codes)
