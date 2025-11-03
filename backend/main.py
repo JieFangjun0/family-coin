@@ -238,7 +238,11 @@ class MarketBidRequest(BaseModel):
     timestamp: float
     listing_id: str
     amount: float
-
+class BidHistoryResponse(BaseModel):
+    bid_amount: float
+    created_at: float
+    bidder_username: str
+    bidder_uid: str
 class MarketOfferRequest(BaseModel):
     owner_key: str
     timestamp: float
@@ -671,6 +675,14 @@ def api_get_offers(listing_id: str):
             offer['trade_description'] = "未知NFT"
             
     return {"offers": offers}
+
+# <<< --- 新增 API 终端 --- >>>
+@app.get("/market/listings/{listing_id}/bids", response_model=List[BidHistoryResponse], tags=["Market"])
+def api_get_bid_history(listing_id: str):
+    """(新增) 获取一个拍卖单的出价历史。"""
+    bids = ledger.get_bids_for_listing(listing_id)
+    return bids
+# <<< --- 新增代码结束 --- >>>
 @app.post("/market/create_listing", response_model=SuccessResponse, tags=["Market"])
 def api_create_listing(request: MarketSignedRequest):
     message = get_verified_message(request, MarketListingRequest)

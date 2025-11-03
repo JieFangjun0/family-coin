@@ -168,6 +168,19 @@ def init_db():
         ''')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_offers_listing_id ON market_offers (listing_id)")
         
+        # <<< --- 新增：拍卖出价记录表 --- >>>
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS auction_bids (
+            bid_id TEXT PRIMARY KEY,
+            listing_id TEXT NOT NULL,
+            bidder_key TEXT NOT NULL,
+            bid_amount REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (listing_id) REFERENCES market_listings(listing_id),
+            FOREIGN KEY (bidder_key) REFERENCES users(public_key)
+        )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bids_listing_id ON auction_bids (listing_id)")
         # --- 设置表等 (不变) ---
         cursor.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
         cursor.execute('CREATE TABLE IF NOT EXISTS invitation_codes (code TEXT PRIMARY KEY, generated_by TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_used BOOLEAN DEFAULT 0, used_by TEXT, FOREIGN KEY (generated_by) REFERENCES users (public_key))')
@@ -466,7 +479,17 @@ def place_auction_bid(bidder_key: str, listing_id: str, bid_amount: float) -> (b
             if not success:
                 conn.rollback()
                 return False, f"托管您的出价资金失败: {detail}"
-            
+            # <<< --- 新增：记录此次出价 --- >>>
+            try:
+                bid_id = str(uuid.uuid4())
+                cursor.execute(
+                    "INSERT INTO auction_bids (bid_id, listing_id, bidder_key, bid_amount) VALUES (?, ?, ?, ?)",
+                    (bid_id, listing_id, bidder_key, bid_amount)
+                )
+            except Exception as e:
+                # 记录失败不应导致出价失败，但我们应该打印一个警告
+                print(f"⚠️ 警告: 记录拍卖出价失败: {e}")
+            # <<< --- 新增结束 --- >>>
             cursor.execute(
                 "UPDATE market_listings SET highest_bid = ?, highest_bidder = ? WHERE listing_id = ?",
                 (bid_amount, bidder_key, listing_id)
@@ -600,7 +623,9 @@ def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
         # VVVVVV  修改下面这个查询语句  VVVVVV
         query = """
             SELECT 
-                l.*, 
+                l.listing_id, l.lister_key, l.listing_type, l.nft_id, l.nft_type,
+                l.description, l.price, l.end_time, l.status, l.highest_bidder,
+                l.highest_bid,
                 u.username as lister_username, 
                 u.uid as lister_uid, 
                 n.data as nft_data,
@@ -667,6 +692,24 @@ def get_offers_for_listing(listing_id: str) -> list:
             results.append(row_dict)
         return results
 
+# <<< --- 新增：获取拍卖出价历史的函数 --- >>>
+def get_bids_for_listing(listing_id: str) -> list:
+    """(新增) 获取一个拍卖挂单的所有出价历史。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT 
+                b.bid_amount, 
+                CAST(strftime('%s', b.created_at) AS REAL) as created_at,
+                u.username as bidder_username,
+                u.uid as bidder_uid
+            FROM auction_bids b
+            JOIN users u ON b.bidder_key = u.public_key
+            WHERE b.listing_id = ?
+            ORDER BY b.created_at DESC
+        """
+        cursor.execute(query, (listing_id,))
+        return [dict(row) for row in cursor.fetchall()]
 def get_my_market_activity(public_key: str) -> dict:
     """获取我所有的市场活动（挂单和报价）。"""
     with get_db_connection() as conn:

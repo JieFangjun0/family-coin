@@ -9,9 +9,15 @@ const props = defineProps({
 
 const emit = defineEmits(['action'])
 
+// *** 核心修改：重构表单状态 ***
 const form = reactive({
-  description: props.nft.data?.description || '一个秘密愿望',
-  price: 10.0
+  list: {
+    description: props.nft.data?.description || '一个秘密愿望',
+    price: 10.0,
+    listing_type: 'SALE', // 新增
+    auction_hours: 24     // 新增
+  },
+  destroy: {}
 })
 
 const now = ref(Date.now() / 1000)
@@ -47,10 +53,13 @@ const countdownStr = computed(() => {
     return `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`
 })
 
+// *** 核心修改：发送更丰富的 payload ***
 function handleListForSale() {
   emit('action', 'list-for-sale', {
-    description: form.description,
-    price: form.price
+    description: form.list.description,
+    price: form.list.price,
+    listing_type: form.list.listing_type,
+    auction_hours: form.list.listing_type === 'AUCTION' ? form.list.auction_hours : null
   })
 }
 
@@ -87,8 +96,22 @@ function handleDestroy() {
 
       <form v-else class="action-form sell-form" @submit.prevent="handleListForSale">
         <h4>🛒 上架出售</h4>
-        <div class="form-group"><label>描述</label><input type="text" v-model="form.description" required /></div>
-        <div class="form-group"><label>价格 (FC)</label><input type="number" v-model.number="form.price" min="0.01" step="0.01" required /></div>
+        <div class="form-group"><label>描述</label><input type="text" v-model="form.list.description" required /></div>
+        <div class="form-group">
+          <label>上架类型</label>
+          <select v-model="form.list.listing_type">
+            <option value="SALE">一口价</option>
+            <option value="AUCTION">拍卖</option>
+          </select>
+        </div>
+        <div class="form-group">
+            <label>{{ form.list.listing_type === 'SALE' ? '价格 (FC)' : '起拍价 (FC)' }}</label>
+            <input type="number" v-model.number="form.list.price" min="0.01" step="0.01" required />
+        </div>
+        <div class="form-group" v-if="form.list.listing_type === 'AUCTION'">
+            <label>拍卖持续小时数</label>
+            <input type="number" v-model.number="form.list.auction_hours" min="0.1" step="0.1" required />
+        </div>
         <button type="submit">确认上架</button>
       </form>
     </template>
@@ -109,7 +132,7 @@ li strong { color: #2d3748; }
 code { background-color: #edf2f7; padding: 0.2rem 0.4rem; border-radius: 4px; }
 .form-group { margin-bottom: 0.75rem; }
 .form-group label { display: block; font-size: 0.8rem; font-weight: 500; margin-bottom: 0.25rem; }
-input { width: 100%; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e0; box-sizing: border-box; }
+input, select { width: 100%; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e0; box-sizing: border-box; }
 button { width: 100%; padding: 0.75rem; font-weight: 600; background-color: #42b883; color: white; border: none; border-radius: 6px; cursor: pointer; }
 .destroy-button { background-color: #f56565; }
 .destroy-button:hover { background-color: #e53e3e; }

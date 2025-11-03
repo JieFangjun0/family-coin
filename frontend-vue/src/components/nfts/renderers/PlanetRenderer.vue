@@ -8,10 +8,13 @@ const props = defineProps({
 
 const emit = defineEmits(['action'])
 
+// *** 核心修改：重构表单状态 ***
 const form = reactive({
   list: {
     description: `行星: ${props.nft.data?.custom_name || `未命名行星 (${props.nft.nft_id?.substring(0, 6)})`}`,
-    price: 50.0
+    price: 50.0,
+    listing_type: 'SALE', // 新增
+    auction_hours: 24     // 新增
   },
   rename: {
     newName: props.nft.data?.custom_name || ''
@@ -23,10 +26,13 @@ const form = reactive({
 
 const displayName = computed(() => props.nft.data?.custom_name || `未命名行星 (${props.nft.nft_id?.substring(0, 6)})`)
 
+// *** 核心修改：发送更丰富的 payload ***
 function handleListForSale() {
   emit('action', 'list-for-sale', {
     description: form.list.description,
-    price: form.list.price
+    price: form.list.price,
+    listing_type: form.list.listing_type,
+    auction_hours: form.list.listing_type === 'AUCTION' ? form.list.auction_hours : null
   })
 }
 
@@ -37,6 +43,7 @@ function handleRename() {
 }
 
 function handleScan() {
+    // 假设后端 /nfts/action 里的 'scan' 动作会自动处理 5 FC 的扣款
     emit('action', 'scan', {
         anomaly: form.scan.selectedAnomaly
     })
@@ -72,7 +79,7 @@ function handleScan() {
                     </option>
                 </select>
             </div>
-            <button type="submit">🚀 启动扫描 (5 FC)</button>
+            <button type="submit">🚀 启动扫描</button>
         </form>
     </div>
 
@@ -90,7 +97,21 @@ function handleScan() {
       <h4>🛒 上架出售</h4>
       <form @submit.prevent="handleListForSale">
         <div class="form-group"><label>描述</label><input type="text" v-model="form.list.description" required /></div>
-        <div class="form-group"><label>价格 (FC)</label><input type="number" v-model.number="form.list.price" min="0.01" step="0.01" required /></div>
+        <div class="form-group">
+          <label>上架类型</label>
+          <select v-model="form.list.listing_type">
+            <option value="SALE">一口价</option>
+            <option value="AUCTION">拍卖</option>
+          </select>
+        </div>
+        <div class="form-group">
+            <label>{{ form.list.listing_type === 'SALE' ? '价格 (FC)' : '起拍价 (FC)' }}</label>
+            <input type="number" v-model.number="form.list.price" min="0.01" step="0.01" required />
+        </div>
+        <div class="form-group" v-if="form.list.listing_type === 'AUCTION'">
+            <label>拍卖持续小时数</label>
+            <input type="number" v-model.number="form.list.auction_hours" min="0.1" step="0.1" required />
+        </div>
         <button type="submit">确认上架</button>
       </form>
     </div>

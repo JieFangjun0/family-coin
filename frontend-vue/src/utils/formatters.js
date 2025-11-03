@@ -1,3 +1,5 @@
+// /frontend-vue/src/utils/formatters.js
+
 /**
  * @fileoverview Utility functions for formatting data.
  */
@@ -8,7 +10,9 @@
  * @returns {string} - The formatted date string (e.g., "2025-11-02 14:30:15"), or 'N/A' if invalid.
  */
 export function formatTimestamp(timestamp) {
-  if (!timestamp || typeof timestamp !== 'number') {
+  // *** 核心修改：使用更健壮的检查 ***
+  // 旧检查 (if (!timestamp || ...)) 会错误地将 0 视为无效
+  if (typeof timestamp !== 'number' || isNaN(timestamp)) {
     return 'N/A';
   }
   // JS Date constructor expects milliseconds, so we multiply by 1000.

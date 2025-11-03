@@ -35,7 +35,9 @@ async function handleNftAction(event) {
     errorMessage.value = null;
 
     if (action === 'list-for-sale') {
-        await handleListForSale(nft, payload);
+        // *** 核心修改点 ***
+        // 此函数现在重命名为 handleCreateListing 以反映其新功能
+        await handleCreateListing(nft, payload);
     } else {
         // Handle generic actions like rename, scan, destroy
         const message = {
@@ -63,23 +65,35 @@ async function handleNftAction(event) {
     }
 }
 
-async function handleListForSale(nft, payload) {
-  const { description, price } = payload
+// *** 核心修改：此函数现在支持一口价和拍卖 ***
+async function handleCreateListing(nft, payload) {
+  // 从 payload 中解构新参数，并提供默认值
+  const { 
+    description, 
+    price, 
+    listing_type = 'SALE', // 默认为 SALE
+    auction_hours = null   // 默认为 null
+  } = payload
   
   if (!price || price <= 0) {
     errorMessage.value = '价格必须大于 0'
+    return
+  }
+  
+  if (listing_type === 'AUCTION' && (!auction_hours || auction_hours <= 0)) {
+    errorMessage.value = '拍卖小时数必须大于 0'
     return
   }
 
   const message = {
     owner_key: authStore.userInfo.publicKey,
     timestamp: Math.floor(Date.now() / 1000),
-    listing_type: 'SALE',
+    listing_type: listing_type, // 使用新参数
     nft_id: nft.nft_id,
     nft_type: nft.nft_type,
     description: description,
     price: price,
-    auction_hours: null
+    auction_hours: listing_type === 'AUCTION' ? auction_hours : null // 仅在拍卖时传递
   }
 
   const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message)
