@@ -12,16 +12,15 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
-  // 【新增部分】
   server: {
-    host: true, // 允许从容器外部访问
+    // 【核心修改】允许从任何主机访问 (对于 Docker 至关重要)
+    host: true, 
     port: 5173, // Vite 默认端口
     proxy: {
-      // 将所有 /api 开头的请求代理到后端服务
+      // 代理配置保持不变，这部分是正确的
       '/api': {
-        target: 'http://backend:8000', // Docker Compose 中的后端服务名
+        target: 'http://backend:8000',
         changeOrigin: true,
-        // 重写路径，去掉 /api 前缀
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     }

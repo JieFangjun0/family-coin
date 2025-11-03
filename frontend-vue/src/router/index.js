@@ -22,6 +22,13 @@ const router = createRouter({
           name: 'wallet',
           component: () => import('@/views/WalletView.vue'),
         },
+        // --- 新增代码 ---
+        {
+          path: '/transfer',
+          name: 'transfer',
+          component: () => import('@/views/TransferView.vue'),
+        },
+        // --- 新增代码结束 ---
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

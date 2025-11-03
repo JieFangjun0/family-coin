@@ -2,15 +2,17 @@
 import { useAuthStore } from '@/stores/auth'
 import { RouterLink } from 'vue-router'
 import IconWallet from '@/components/icons/IconWallet.vue'
-// Import other icons as we create them
-// import IconTransfer from '@/components/icons/IconTransfer.vue'
+// --- 新增代码 ---
+import IconTransfer from '@/components/icons/IconTransfer.vue'
+// --- 新增代码结束 ---
 
 const authStore = useAuthStore()
 
 const navItems = [
   { name: '我的钱包', routeName: 'wallet', icon: IconWallet },
-  // { name: '转账', routeName: 'transfer', icon: IconTransfer },
-  // ... add more items later
+  // --- 新增代码 ---
+  { name: '转账', routeName: 'transfer', icon: IconTransfer },
+  // --- 新增代码结束 ---
 ]
 
 function handleLogout() {

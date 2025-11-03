@@ -436,17 +436,17 @@ def api_create_transaction(request: TransactionRequest):
         
     return SuccessResponse(detail=detail)
 
-@app.get("/balance/", response_model=BalanceResponse, tags=["User"])
+@app.get("/balance", response_model=BalanceResponse, tags=["User"])
 def api_get_balance(public_key: str):
     balance = ledger.get_balance(public_key)
     return BalanceResponse(public_key=public_key, balance=balance)
 
-@app.get("/history/", response_model=HistoryResponse, tags=["User"])
+@app.get("/history", response_model=HistoryResponse, tags=["User"])
 def api_get_history(public_key: str):
     history = ledger.get_transaction_history(public_key)
     return HistoryResponse(transactions=history)
 
-@app.get("/user/details/", response_model=UserDetailsResponse, tags=["User"])
+@app.get("/user/details", response_model=UserDetailsResponse, tags=["User"])
 def api_get_user_details(public_key: str):
     details = ledger.get_user_details(public_key)
     if not details:
@@ -488,7 +488,7 @@ def api_generate_invitation(request: MarketSignedRequest):
         
     return InvitationCodeResponse(code=code_or_error)
 
-@app.get("/user/my_invitations/", response_model=InvitationCodeListResponse, tags=["User"])
+@app.get("/user/my_invitations", response_model=InvitationCodeListResponse, tags=["User"])
 def api_get_my_invitations(public_key: str):
     if not public_key or "PUBLIC KEY" not in public_key:
          raise HTTPException(status_code=400, detail="无效的公钥格式")
@@ -572,7 +572,7 @@ def api_get_nft_display_names():
     for nft_type, handler_class in NFT_HANDLERS.items():
         names[nft_type] = handler_class.get_display_name()
     return names
-@app.get("/nfts/my/", response_model=NFTListResponse, tags=["NFT"])
+@app.get("/nfts/my", response_model=NFTListResponse, tags=["NFT"])
 def api_get_my_nfts(public_key: str):
     if not public_key:
         raise HTTPException(status_code=400, detail="必须提供公钥")
