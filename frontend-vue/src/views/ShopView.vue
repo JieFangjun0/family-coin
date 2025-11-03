@@ -26,21 +26,24 @@ const isLoading = ref({
   myListings: true,
 })
 
-// 修改：现在“我的挂单”会显示所有状态的挂单，而不仅仅是ACTIVE
 const sortedMyListings = computed(() => {
+  if (!myActivity.value.listings) return []
   return [...myActivity.value.listings].sort((a, b) => {
-    // 将 ACTIVE 状态的排在前面
-    if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
-    if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1;
-    return 0; // 其他状态保持原有顺序（按时间）
-  });
+    if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1
+    if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1
+    // 按创建时间降序排列
+    return b.created_at - a.created_at
+  })
 })
 
 // --- 数据获取方法 ---
 
 async function fetchDataForTab(tab) {
+  errorMessage.value = null;
+  successMessage.value = null;
   switch (tab) {
     case 'mint':
+      // 只有在从未加载过的情况下才加载
       if (Object.keys(creatableNfts.value).length === 0) await fetchCreatableNfts();
       break;
     case 'buy':
@@ -52,12 +55,41 @@ async function fetchDataForTab(tab) {
   }
 }
 
-async function fetchBalance() { /* ... (此函数不变) ... */ }
-async function fetchCreatableNfts() { /* ... (此函数不变) ... */ }
+async function fetchBalance() {
+  isLoading.value.balance = true
+  const [data, error] = await apiCall('GET', '/balance', {
+    params: { public_key: authStore.userInfo.publicKey }
+  })
+  if (error) {
+    errorMessage.value = `无法加载余额: ${error}`
+  } else {
+    balance.value = data.balance
+  }
+  isLoading.value.balance = false
+}
+
+async function fetchCreatableNfts() {
+  isLoading.value.mint = true
+  const [data, error] = await apiCall('GET', '/market/creatable_nfts')
+  if (error) {
+    errorMessage.value = `无法加载可铸造物品: ${error}`
+  } else {
+    creatableNfts.value = data
+    // 为每个可铸造的NFT初始化表单对象
+    for (const nftType in data) {
+      mintForms.value[nftType] = {}
+      if (data[nftType].fields) {
+        for (const field of data[nftType].fields) {
+          mintForms.value[nftType][field.name] = field.default ?? ''
+        }
+      }
+    }
+  }
+  isLoading.value.mint = false
+}
 
 async function fetchSaleListings() {
   isLoading.value.buy = true
-  // 修改：不再排除自己，以便能看到自己的挂单
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'SALE' }
   })
@@ -69,31 +101,123 @@ async function fetchSaleListings() {
   isLoading.value.buy = false
 }
 
-async function fetchMyActivity() { /* ... (此函数不变) ... */ }
+async function fetchMyActivity() {
+  isLoading.value.myListings = true
+  const [data, error] = await apiCall('GET', '/market/my_activity', {
+    params: { public_key: authStore.userInfo.publicKey }
+  })
+  if (error) {
+    errorMessage.value = `无法加载我的挂单: ${error}`
+  } else {
+    myActivity.value = data
+  }
+  isLoading.value.myListings = false
+}
 
 // --- 操作方法 ---
-async function handleMintNft(nftType, config) { /* ... (此函数不变) ... */ }
-async function handleBuyNft(item) { /* ... (此函数不变) ... */ }
-async function handleCancelListing(listingId) { /* ... (此函数不变) ... */ }
+
+async function handleMintNft(nftType, config) {
+  successMessage.value = null
+  errorMessage.value = null
+
+  if (balance.value < config.cost) {
+    errorMessage.value = "你的余额不足以支付铸造成本"
+    return
+  }
+
+  const message = {
+    owner_key: authStore.userInfo.publicKey,
+    timestamp: Math.floor(Date.now() / 1000),
+    nft_type: nftType,
+    cost: config.cost,
+    data: mintForms.value[nftType]
+  }
+
+  const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message)
+  if (!signedPayload) {
+    errorMessage.value = '创建签名失败'
+    return
+  }
+  
+  const endpoint = config.action_type === 'create' ? '/market/create_nft' : '/market/shop_action'
+  const [data, error] = await apiCall('POST', endpoint, { payload: signedPayload })
+
+  if (error) {
+    errorMessage.value = `操作失败: ${error}`
+  } else {
+    successMessage.value = data.detail
+    await fetchBalance() // 刷新余额
+  }
+}
+
+async function handleBuyNft(item) {
+  successMessage.value = null
+  errorMessage.value = null
+
+  const message = {
+    owner_key: authStore.userInfo.publicKey,
+    listing_id: item.listing_id,
+    timestamp: Math.floor(Date.now() / 1000),
+  }
+
+  const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message)
+  if (!signedPayload) {
+    errorMessage.value = '创建购买签名失败'
+    return
+  }
+
+  const [data, error] = await apiCall('POST', '/market/buy', { payload: signedPayload })
+  if (error) {
+    errorMessage.value = `购买失败: ${error}`
+  } else {
+    successMessage.value = data.detail
+    await fetchBalance()
+    await fetchSaleListings()
+  }
+}
+
+async function handleCancelListing(listingId) {
+  successMessage.value = null
+  errorMessage.value = null
+
+  const message = {
+    owner_key: authStore.userInfo.publicKey,
+    listing_id: listingId,
+    timestamp: Math.floor(Date.now() / 1000),
+  }
+  const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message)
+  if (!signedPayload) {
+    errorMessage.value = '创建取消签名失败'
+    return
+  }
+
+  const [data, error] = await apiCall('POST', '/market/cancel_listing', { payload: signedPayload })
+
+  if (error) {
+    errorMessage.value = `取消失败: ${error}`
+  } else {
+    successMessage.value = data.detail
+    await fetchMyActivity()
+  }
+}
+
 
 // --- Tab 切换 ---
 function selectTab(tab) {
   activeTab.value = tab
-  errorMessage.value = null
-  successMessage.value = null
   fetchDataForTab(tab)
 }
 
 // --- 格式化辅助 ---
 const LISTING_TYPE_MAP = { "SALE": "一口价", "AUCTION": "拍卖", "SEEK": "求购" }
-const STATUS_MAP = { "ACTIVE": "进行中", "COMPLETED": "已完成", "CANCELLED": "已取消", "EXPIRED": "已过期", "SOLD": "已售出", "FULFILLED": "已成交" }
+const STATUS_MAP = { "ACTIVE": "进行中", "PENDING": "待处理", "COMPLETED": "已完成", "CANCELLED": "已取消", "REJECTED": "已拒绝", "EXPIRED": "已过期", "SOLD": "已售出", "FULFILLED": "已成交" }
 
 function translateListingType(type) { return LISTING_TYPE_MAP[type] || type }
 function translateStatus(status) { return STATUS_MAP[status] || status }
 
 onMounted(() => {
   fetchBalance()
-  selectTab('mint')
+  selectTab('mint') // 默认加载第一个tab
 })
 </script>
 
@@ -129,7 +253,7 @@ onMounted(() => {
             <span class="nft-price">{{ formatCurrency(config.cost) }} FC</span>
           </div>
           <p class="nft-description">{{ config.description }}</p>
-          <form class="mint-form" @submit.prevent="handleMintNft(nftType, config)">
+          <form v-if="mintForms[nftType]" class="mint-form" @submit.prevent="handleMintNft(nftType, config)">
             <div v-for="field in config.fields" :key="field.name" class="form-group">
               <label :for="`${nftType}-${field.name}`">{{ field.label }}</label>
               <input 
@@ -243,7 +367,7 @@ onMounted(() => {
 .nft-type { background-color: #e2e8f0; color: #4a5568; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
 .nft-type-listing { background-color: #bee3f8; color: #2c5282; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
 .nft-price { font-size: 1.1rem; font-weight: 700; color: #2d3748; }
-.nft-description { padding: 0 1.25rem; font-size: 0.9rem; color: #718096; }
+.nft-description { padding: 0 1.25rem; font-size: 0.9rem; color: #718096; margin: 1rem 0;}
 .nft-name { margin: 0; padding: 1rem 1.25rem 0.5rem 1.25rem; font-size: 1.25rem; color: #2d3748; }
 .nft-data { list-style: none; padding: 0.5rem 1.25rem 1.25rem 1.25rem; margin: 0; flex-grow: 1; font-size: 0.9rem; color: #4a5568; }
 .nft-data li { margin-bottom: 0.5rem; }

@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
-import NftCard from '@/components/nfts/NftCard.vue' // 导入新的分发组件
+import NftCard from '@/components/nfts/NftCard.vue'
 
 const authStore = useAuthStore()
 const nfts = ref([])
@@ -14,7 +14,7 @@ const successMessage = ref(null)
 async function fetchNfts() {
   isLoading.value = true
   errorMessage.value = null
-  successMessage.value = null
+  // successMessage.value = null; // Don't clear success message on auto-refresh
 
   const [data, error] = await apiCall('GET', '/nfts/my', {
     params: { public_key: authStore.userInfo.publicKey }
@@ -28,11 +28,43 @@ async function fetchNfts() {
   isLoading.value = false
 }
 
-// 这个函数现在接收来自子组件的事件负载
-async function handleListForSale(payload) {
-  const { nft, description, price } = payload
-  successMessage.value = null
-  errorMessage.value = null
+// 通用NFT动作处理器
+async function handleNftAction(event) {
+    const { action, nft, payload } = event;
+    successMessage.value = null;
+    errorMessage.value = null;
+
+    if (action === 'list-for-sale') {
+        await handleListForSale(nft, payload);
+    } else {
+        // Handle generic actions like rename, scan, destroy
+        const message = {
+            owner_key: authStore.userInfo.publicKey,
+            nft_id: nft.nft_id,
+            action: action,
+            action_data: payload,
+            timestamp: Math.floor(Date.now() / 1000)
+        };
+
+        const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
+        if (!signedPayload) {
+            errorMessage.value = '创建签名失败';
+            return;
+        }
+
+        const [data, error] = await apiCall('POST', '/nfts/action', { payload: signedPayload });
+
+        if (error) {
+            errorMessage.value = `操作失败: ${error}`;
+        } else {
+            successMessage.value = data.detail || '操作成功!';
+            await fetchNfts(); // Refresh the list
+        }
+    }
+}
+
+async function handleListForSale(nft, payload) {
+  const { description, price } = payload
   
   if (!price || price <= 0) {
     errorMessage.value = '价格必须大于 0'
@@ -61,7 +93,6 @@ async function handleListForSale(payload) {
     errorMessage.value = `上架失败: ${error}`
   } else {
     successMessage.value = `上架成功！${data.detail || ''}`
-    // 刷新列表，上架的 NFT 将会消失
     await fetchNfts()
   }
 }
@@ -73,7 +104,7 @@ onMounted(fetchNfts)
   <div class="collection-view">
     <header class="view-header">
       <h1>🖼️ 我的收藏</h1>
-      <p class="subtitle">你拥有的所有 NFT 都在这里。你可以在这里将它们上架出售。</p>
+      <p class="subtitle">你拥有的所有 NFT 都在这里。你可以与它们互动，或将它们上架出售。</p>
     </header>
 
     <div v-if="isLoading" class="loading-state">正在加载...</div>
@@ -89,7 +120,7 @@ onMounted(fetchNfts)
         v-for="nft in nfts" 
         :key="nft.nft_id" 
         :nft="nft"
-        @list-for-sale="handleListForSale"
+        @action="handleNftAction"
       />
     </div>
   </div>
@@ -103,7 +134,7 @@ onMounted(fetchNfts)
 
 .nft-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
   gap: 1.5rem;
 }
 

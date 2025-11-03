@@ -671,10 +671,31 @@ def get_my_market_activity(public_key: str) -> dict:
     """获取我所有的市场活动（挂单和报价）。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM market_listings WHERE lister_key = ? ORDER BY created_at DESC", (public_key,))
+        
+        # --- BUG #1 FIX: Use explicit column names to avoid conflicts ---
+        listings_query = """
+            SELECT 
+                listing_id, lister_key, listing_type, nft_id, nft_type, 
+                description, price, end_time, status, highest_bidder, 
+                highest_bid, CAST(strftime('%s', created_at) AS REAL) as created_at
+            FROM market_listings 
+            WHERE lister_key = ? 
+            ORDER BY created_at DESC
+        """
+        cursor.execute(listings_query, (public_key,))
         my_listings = [dict(row) for row in cursor.fetchall()]
-        cursor.execute("SELECT * FROM market_offers WHERE offerer_key = ? ORDER BY created_at DESC", (public_key,))
+        
+        offers_query = """
+            SELECT 
+                offer_id, listing_id, offerer_key, offered_nft_id, status,
+                CAST(strftime('%s', created_at) AS REAL) as created_at
+            FROM market_offers 
+            WHERE offerer_key = ? 
+            ORDER BY created_at DESC
+        """
+        cursor.execute(offers_query, (public_key,))
         my_offers = [dict(row) for row in cursor.fetchall()]
+
         return {"listings": my_listings, "offers": my_offers}
 
 def get_setting(key: str) -> str:
