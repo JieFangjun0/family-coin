@@ -15,6 +15,7 @@ const isLoading = ref(true)
 const isGenerating = ref(false)
 const errorMessage = ref(null)
 const successMessage = ref(null)
+const copiedCode = ref(null) // 新增：用于跟踪哪个邀请码被复制了
 
 // --- Data Fetching ---
 async function fetchData() {
@@ -54,7 +55,7 @@ async function handleGenerateCode() {
     timestamp: Date.now() / 1000,
   };
 
-  const signedPayload = await createSignedPayload(authStore.userInfo.privateKey, message);
+  const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
   if (!signedPayload) {
     errorMessage.value = '创建签名失败。';
     isGenerating.value = false;
@@ -67,11 +68,24 @@ async function handleGenerateCode() {
     errorMessage.value = `生成失败: ${error}`;
   } else {
     successMessage.value = `成功生成新的邀请码: ${data.code}`;
-    // Refresh data to show new code and updated quota
     await fetchData();
   }
 
   isGenerating.value = false;
+}
+
+// --- 新增：复制到剪贴板的方法 ---
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    copiedCode.value = text; // 记录哪个码被复制了，用于UI反馈
+    setTimeout(() => {
+      copiedCode.value = null; // 2秒后重置状态
+    }, 2000);
+  } catch (err) {
+    console.error('复制失败: ', err);
+    // 可以在这里添加一个错误提示
+  }
 }
 
 // --- Lifecycle Hook ---
@@ -125,7 +139,11 @@ onMounted(fetchData);
               <tr v-for="code in myCodes" :key="code.code">
                 <td class="code-value">{{ code.code }}</td>
                 <td>{{ formatTimestamp(code.created_at) }}</td>
-                <td><button @click="navigator.clipboard.writeText(code.code)">复制</button></td>
+                <td>
+                  <button @click="copyToClipboard(code.code)" :disabled="copiedCode === code.code">
+                    {{ copiedCode === code.code ? '已复制!' : '复制' }}
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -200,7 +218,7 @@ button {
   transition: background-color 0.2s;
 }
 button:hover { background-color: #369b6e; }
-button:disabled { background-color: #ccc; cursor: not-allowed; }
+button:disabled { background-color: #a0aec0; cursor: not-allowed; }
 
 .codes-section h2 {
   font-size: 1.5rem;

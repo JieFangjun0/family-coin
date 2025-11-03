@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { apiCall } from '@/api';
+import { createSignedPayload } from '@/utils/crypto'; // 导入签名函数
 import BalanceCard from '@/components/wallet/BalanceCard.vue';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -27,7 +28,7 @@ async function fetchData() {
   isLoading.value = true;
   errorMessage.value = null;
 
-  // Fetch balance and friends list in parallel
+  // 并行获取余额和好友列表
   const [balanceResult, friendsResult] = await Promise.all([
     apiCall('GET', '/balance', { params: { public_key: authStore.userInfo.publicKey } }),
     apiCall('GET', '/friends/list', { params: { public_key: authStore.userInfo.publicKey } })
@@ -44,7 +45,8 @@ async function fetchData() {
   if (friendsError) {
     errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + `无法获取好友列表: ${friendsError}`;
   } else {
-    friends.value = friendsData?.friends ?? [];
+    // 按用户名排序好友列表
+    friends.value = (friendsData?.friends ?? []).sort((a, b) => a.username.localeCompare(b.username));
   }
 
   isLoading.value = false;
@@ -52,6 +54,10 @@ async function fetchData() {
 
 // --- Methods ---
 async function handleTransfer() {
+  // 清空之前的消息
+  errorMessage.value = null;
+  successMessage.value = null;
+
   if (form.value.amount <= 0) {
     errorMessage.value = '转账金额必须大于 0。';
     return;
@@ -64,55 +70,47 @@ async function handleTransfer() {
     errorMessage.value = '你的余额不足。';
     return;
   }
+  if (form.value.recipientKey === authStore.userInfo.publicKey) {
+      errorMessage.value = '不能给自己转账。';
+      return;
+  }
 
   isSubmitting.value = true;
-  errorMessage.value = null;
-  successMessage.value = null;
 
-  // We need to sign the message with the private key
+  // 1. 准备要签名的消息
   const message = {
     from_key: authStore.userInfo.publicKey,
     to_key: form.value.recipientKey,
     amount: form.value.amount,
     note: form.value.note,
-    timestamp: Date.now() / 1000 // Backend expects seconds
+    timestamp: Math.floor(Date.now() / 1000) // 后端需要以秒为单位的整数时间戳
   };
   
-  // This is a placeholder for the actual signing logic which we need to implement.
-  // For now, we'll assume a utility function `signMessage` exists.
-  // Note: We need a crypto library like `tweetnacl` or `noble-ed25519` for this.
-  // Let's proceed assuming we have a way to sign, and handle the actual crypto implementation next.
-  
-  // For now, let's just make the apiCall and expect it to fail without a valid signature.
-  // In a real scenario, you would integrate a signing function here.
-  
-  // This part of the code is simplified. A real implementation
-  // would require a JavaScript cryptography library to create the signature.
-  // The backend's `shared/crypto_utils.py` uses Ed25519.
-  alert('注意：前端签名逻辑尚未实现！此请求将因签名无效而失败。我们需要引入一个加密库来完成此功能。');
+  // 2. 调用我们修复好的签名函数（注意：它是同步的，不需要 await）
+  const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
 
-  // Placeholder for signed payload
-  const signedPayload = {
-    message_json: JSON.stringify(message),
-    signature: 'invalid_signature_placeholder'
-  };
+  if (!signedPayload) {
+    errorMessage.value = '创建交易签名失败，请检查浏览器控制台。';
+    isSubmitting.value = false;
+    return;
+  }
 
-  const [, error] = await apiCall('POST', '/transaction', { payload: signedPayload });
+  // 3. 发送 API 请求
+  const [data, error] = await apiCall('POST', '/transaction', { payload: signedPayload });
 
   if (error) {
     errorMessage.value = `转账失败: ${error}`;
   } else {
-    successMessage.value = `成功向 ${form.value.recipientKey.substring(0, 15)}... 转账 ${formatCurrency(form.value.amount)} FC！`;
-    // Reset form and refresh data
+    successMessage.value = `转账成功！${data.detail || ''}`;
+    // 重置表单并刷新数据
     form.value.recipientKey = '';
     form.value.amount = 0.01;
     form.value.note = '';
-    fetchData(); // Refresh balance
+    await fetchData(); // 刷新余额
   }
 
   isSubmitting.value = false;
 }
-
 
 // --- Lifecycle Hook ---
 onMounted(fetchData);
@@ -135,7 +133,7 @@ onMounted(fetchData);
       <button @click="fetchData">重试</button>
     </div>
 
-    <div v-if="!isLoading && !errorMessage" class="transfer-content">
+    <div v-if="!isLoading" class="transfer-content">
       <BalanceCard label="可用余额" :value="formatCurrency(balance)" unit="FC" />
 
       <form @submit.prevent="handleTransfer" class="transfer-form">
@@ -163,9 +161,10 @@ onMounted(fetchData);
         </div>
         
         <div v-if="successMessage" class="message success">{{ successMessage }}</div>
+        <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
 
         <button type="submit" :disabled="isSubmitting || form.amount > balance">
-          {{ isSubmitting ? '交易处理中...' : (form.amount > balance ? '余额不足' : '确认转账') }}
+          {{ isSubmitting ? '交易处理中...' : (form.amount > balance ? '余额不足' : '签名并转账') }}
         </button>
 
       </form>
@@ -257,8 +256,9 @@ button {
   transition: background-color 0.2s;
 }
 button:hover { background-color: #369b6e; }
-button:disabled { background-color: #ccc; cursor: not-allowed; }
+button:disabled { background-color: #a0aec0; cursor: not-allowed; }
 
-.message { padding: 1rem; border-radius: 4px; text-align: center; }
-.success { color: #270; background-color: #dff2bf; }
+.message { padding: 1rem; border-radius: 4px; text-align: center; font-weight: 500;}
+.success { color: #155724; background-color: #d4edda; }
+.error { color: #d8000c; background-color: #ffbaba; }
 </style>

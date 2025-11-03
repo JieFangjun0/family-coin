@@ -3,8 +3,11 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import IconWallet from '@/components/icons/IconWallet.vue'
 import IconTransfer from '@/components/icons/IconTransfer.vue'
-// --- 1. 导入新图标 ---
 import IconInvite from '@/components/icons/IconInvite.vue'
+// --- 1. 导入新图标 ---
+import IconShop from '@/components/icons/IconShop.vue'
+import IconCollection from '@/components/icons/IconCollection.vue'
+
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -25,6 +28,17 @@ const navItems = [
     name: '邀请',
     routeName: 'invitations',
     icon: IconInvite,
+  },
+  // --- 3. 添加新条目 ---
+  {
+    name: '商店',
+    routeName: 'shop',
+    icon: IconShop,
+  },
+  {
+    name: '我的收藏',
+    routeName: 'collection',
+    icon: IconCollection,
   },
 ]
 
