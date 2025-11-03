@@ -590,26 +590,7 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             conn.rollback()
             return False, f"处理报价失败: {e}"
         
-好的，你提出的这些问题非常具体，都是很关键的体验优化点。根据你的截图和描述，我们来逐一击破。
 
-问题可以分为两类：
-
-数据问题：“铸造工坊”和“我的挂单”没内容，“上架于”显示N/A。
-
-UI/UX问题：Tab按钮和“浏览市场”的卡片布局不好看。
-
-我将提供一个后端文件修改和一个前端文件修改来一次性解决所有这些问题。
-
-1. 后端修复：“上架于: N/A” 的时间Bug
-这个bug的根源在于后端 ledger.py 在查询市场列表时，没有将数据库中的时间戳字符串转换为JS友好的Unix时间戳数字。
-
-请修改 backend/ledger.py 文件：
-
-找到 get_market_listings 函数，在 SELECT 语句中为 created_at 字段添加一个 CAST 转换。
-
-Python
-
-# backend/ledger.py
 
 def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
     """获取市场上的所有挂单。"""
