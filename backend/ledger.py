@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from werkzeug.security import generate_password_hash, check_password_hash
 from shared.crypto_utils import verify_signature, generate_key_pair
 from backend.nft_logic import get_handler
+from typing import Optional # <--- (新增) 导入 Optional
+
 DATABASE_PATH = '/app/data/ledger.db'
 LEDGER_LOCK = threading.Lock()
 
@@ -204,24 +206,37 @@ def init_db():
         # 添加邀请人成功邀请新用户的奖励设置
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('inviter_bonus_amount', '200'))
 
-        # <<< --- 移除旧的机器人设置 --- >>>
-        cursor.execute("DELETE FROM settings WHERE key LIKE 'bot_%'")
+        # +++ (修改) 新增 V2 机器人全局设置 (替换旧的删除逻辑) +++
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('bot_system_enabled', 'False'))
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('bot_check_interval_seconds', '30'))
         
         conn.commit()
         print("数据库初始化完成 (V3.2 Bots Re-arch)。")
 
 # --- 机器人管理核心 (重构) ---
 
-def admin_create_bot(username: str, bot_type: str, initial_funds: float, action_probability: float) -> (bool, str, dict):
-    """(新增) 管理员创建并供给一个机器人用户。"""
+def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: float, action_probability: float) -> (bool, str, dict):
+    """(修改) 管理员创建并供给一个机器人用户 (支持自动命名)。"""
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
             
-            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-            if cursor.fetchone():
-                return False, "用户名已存在", None
-
+            # --- (修改) 自动生成或验证用户名 ---
+            if not username:
+                # 自动生成
+                base_name_prefix = bot_type.replace('Bot', '').upper()
+                while True:
+                    username = f"BOT_{base_name_prefix}_{_generate_uid(3)}"
+                    cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+                    if not cursor.fetchone():
+                        break
+            else:
+                # 验证
+                cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+                if cursor.fetchone():
+                    return False, "用户名已存在", None
+            # --- 修改结束 ---
+            
             private_key, public_key = generate_key_pair()
             # 机器人不需要人类可记忆的密码，创建一个安全的随机密码
             bot_password = _generate_secure_password(20)

@@ -278,7 +278,7 @@ class ShopActionRequest(BaseModel):
 
 # +++ (新增) 新的机器人 Pydantic 模型 +++
 class AdminCreateBotRequest(BaseModel):
-    username: str
+    username: Optional[str] = None # <--- (修改) 设为可选
     bot_type: str
     initial_funds: float
     action_probability: float
@@ -916,7 +916,8 @@ async def api_admin_create_bot(request: AdminCreateBotRequest):
     """
     if request.bot_type not in BOT_LOGIC_MAP:
         raise HTTPException(status_code=400, detail="无效的机器人类型")
-    if not request.username or len(request.username) < 3:
+    # --- (修改) 允许用户名为空，但如果提供了，则必须>3 ---
+    if request.username and len(request.username) < 3:
         raise HTTPException(status_code=400, detail="机器人用户名至少需要3个字符")
     if request.initial_funds < 0:
         raise HTTPException(status_code=400, detail="初始资金不能为负")

@@ -92,7 +92,28 @@ def run_bot_loop():
     
     while True:
         try:
-            # 1. 动态调整机器人实例 (登录/注销)
+            # +++ (新增) 1. 从数据库读取宏观设置 +++
+            try:
+                # (这是同步函数，但在此线程循环中是允许的)
+                enabled_str = ledger.get_setting("bot_system_enabled")
+                interval_str = ledger.get_setting("bot_check_interval_seconds")
+                
+                bot_system_enabled = enabled_str == 'True'
+                check_interval = int(interval_str) if interval_str else 30
+                
+                if not bot_system_enabled:
+                    print(f"--- 机器人系统：系统在设置中被禁用。将在 {check_interval} 秒后重试... ---")
+                    if _active_bots:
+                         _active_bots.clear() # 清空内存中的机器人
+                    time.sleep(check_interval)
+                    continue
+                    
+            except Exception as e:
+                print(f"❌ Bot Runner: 无法从数据库读取全局配置: {e}。使用默认值。")
+                check_interval = 30
+            # +++ 新增结束 +++
+
+            # 2. 动态调整机器人实例 (登录/注销)
             loop.run_until_complete(update_active_bots())
             
             if not _active_bots:
@@ -100,7 +121,7 @@ def run_bot_loop():
                 time.sleep(check_interval)
                 continue
 
-            # 2. 概率性触发机器人动作
+            # 3. 概率性触发机器人动作
             print(f"\n--- 机器人回合开始 (T={time.strftime('%H:%M:%S')}) ---")
             
             tasks = []
