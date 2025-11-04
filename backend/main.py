@@ -4,9 +4,11 @@ import time
 import json
 from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict,Any
 import uvicorn
 import os
+import threading
+from backend.bots import bot_runner, BOT_LOGIC_MAP
 from werkzeug.security import generate_password_hash
 
 from shared.crypto_utils import (
@@ -268,7 +270,17 @@ class ShopActionRequest(BaseModel):
     nft_type: str
     cost: float
     data: dict
+class BotGlobalSettings(BaseModel):
+    bot_system_enabled: bool
+    bot_check_interval_seconds: int
 
+class BotTypeConfig(BaseModel):
+    count: int
+    action_probability: float
+
+class FullBotConfigRequest(BaseModel):
+    global_settings: BotGlobalSettings
+    bot_types: Dict[str, BotTypeConfig]
 # --- 管理员认证 ---
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
 GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
@@ -287,8 +299,16 @@ app = FastAPI(
 
 @app.on_event("startup")
 def on_startup():
-    print("正在启动 API (V3.0 Market)... 初始化数据库...")
+    print("正在启动 API ... 初始化数据库...")
     ledger.init_db()
+    
+    print("--- API 启动：正在启动后台机器人调度器线程... ---")
+    bot_thread = threading.Thread(
+        target=bot_runner.run_bot_loop, 
+        daemon=True 
+    )
+    bot_thread.start()
+    print("--- API 启动：机器人线程已启动。 ---")
 
 # --- 系统状态接口 ---
 @app.get("/status", tags=["System"])
@@ -853,6 +873,81 @@ def api_perform_shop_action(request: MarketSignedRequest):
         conn.commit()
         return SuccessResponse(detail=detail)
 
+# ==============================================================================
+# --- (新增) 机器人管理 API ---
+# ==============================================================================
+@app.get("/admin/bots/config", tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+async def api_admin_get_bot_config():
+    """
+    (重构) 获取当前机器人系统的配置 (动态发现)。
+    """
+    config = ledger.get_bot_config()
+    
+    # 1. 分离全局配置
+    global_config = {
+        "bot_system_enabled": config.get("bot_system_enabled", False),
+        "bot_check_interval_seconds": config.get("bot_check_interval_seconds", 30)
+    }
+    
+    # 2. 动态构建机器人类型配置
+    bot_type_configs = {}
+    
+    # 3. 迭代所有在后端注册的机器人
+    for bot_name, bot_class in BOT_LOGIC_MAP.items():
+        # 从数据库加载配置，或使用默认值
+        db_config = config.get(bot_name, {"count": 0, "action_probability": 0.1})
+        
+        # 自动提取描述
+        description = "该机器人没有提供描述。"
+        if bot_class.__doc__:
+            description = bot_class.__doc__.strip().split('\n')[0] # 取文档字符串的第一行
+            
+        bot_type_configs[bot_name] = {
+            "count": db_config.get("count", 0),
+            "action_probability": db_config.get("action_probability", 0.1),
+            "description": description # <--- 动态将描述发送给前端
+        }
+    # 4. 返回解耦的结构
+    return {
+        "global_settings": global_config,
+        "bot_types": bot_type_configs
+    }
+@app.post("/admin/bots/config", response_model=SuccessResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+async def api_admin_set_bot_config(request: FullBotConfigRequest): # <--- 5. 使用新的 Pydantic 模型
+    """
+    (重构) 更新机器人系统的配置。
+    """
+    try:
+        with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
+            cursor = conn.cursor()
+            # 1. 保存全局设置
+            cursor.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("bot_system_enabled", str(request.global_settings.bot_system_enabled).lower())
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("bot_check_interval_seconds", str(request.global_settings.bot_check_interval_seconds))
+            )
+            # 2. 保存所有已知的机器人特定设置
+            for bot_name, config in request.bot_types.items():
+                if bot_name in BOT_LOGIC_MAP: # 确保只保存后端认识的机器人
+                    db_key = f"bot_config_{bot_name}"
+                    # 只保存 count 和 probability
+                    config_to_save = {
+                        "count": config.count,
+                        "action_probability": config.action_probability
+                    }
+                    db_value = json.dumps(config_to_save, ensure_ascii=False)
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                        (db_key, db_value)
+                    )
+            conn.commit()
+            
+        return SuccessResponse(detail="机器人配置已成功更新。")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存配置失败: {e}")
 # --- 管理员接口 ---
 @app.get("/admin/nft/types", response_model=List[str], tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
 def api_admin_get_nft_types():

@@ -8,3 +8,4 @@ pandas
 pydantic
 pytz
 werkzeug<3.0
+httpx

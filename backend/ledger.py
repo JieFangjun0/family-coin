@@ -6,6 +6,7 @@ import json
 import os
 import random
 import string
+import secrets
 from contextlib import contextmanager
 from werkzeug.security import generate_password_hash, check_password_hash
 from shared.crypto_utils import verify_signature, generate_key_pair
@@ -20,6 +21,10 @@ ESCROW_ACCOUNT = "JFJ_ESCROW"
 
 DEFAULT_INVITATION_QUOTA = 3
 
+def _generate_secure_password(length=12):
+    """(新增) 生成一个安全的随机密码。"""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(secrets.choice(alphabet) for i in range(length))
 def _generate_uid(length=8):
     """生成一个指定长度的纯数字UID。"""
     return ''.join(random.choices(string.digits, k=length))
@@ -190,9 +195,100 @@ def init_db():
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('welcome_bonus_amount', '500'))
         # 添加邀请人成功邀请新用户的奖励设置
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('inviter_bonus_amount', '200'))
+        # <<< --- 新增：为机器人系统添加默认设置 --- >>>
+        bot_defaults = {
+            "bot_system_enabled": "false",
+            "bot_check_interval_seconds": "30",
+            "bot_config_PlanetExplorerBot": json.dumps({"count": 2, "action_probability": 0.25}),
+            "bot_config_BargainHunterBot": json.dumps({"count": 1, "action_probability": 0.5})
+        }
+        for key, value in bot_defaults.items():
+             cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        # <<< --- 新增结束 --- >>>
         conn.commit()
         print("数据库初始化完成 (V3.1 Friends)。")
 
+def get_bot_config() -> dict:
+    """(新增) 从数据库加载并构造机器人配置对象。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM settings WHERE key LIKE 'bot_%'")
+        settings_rows = cursor.fetchall()
+        
+        config = {}
+        for row in settings_rows:
+            key = row['key']
+            value = row['value']
+            
+            if key == "bot_system_enabled":
+                config[key] = (value.lower() == "true")
+            elif key == "bot_check_interval_seconds":
+                config[key] = int(value)
+            elif key.startswith("bot_config_"):
+                # 提取机器人类型名称
+                bot_type_name = key.replace("bot_config_", "")
+                try:
+                    # 解析 JSON 配置
+                    config[bot_type_name] = json.loads(value)
+                except json.JSONDecodeError:
+                    print(f"❌ 警告：无法解析机器人配置 {key}，使用默认值。")
+                    config[bot_type_name] = {"count": 0, "action_probability": 0.0}
+        
+        return config
+
+def provision_bot_user(username: str, password: str, bot_type: str) -> bool:
+    """
+    (新增) 自动供给一个机器人用户。
+    如果用户不存在，则创建它，并设置密码和初始资金。
+    如果已存在，则什么也不做。
+    返回 True 表示用户已准备就绪。
+    """
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                return True # 用户已存在
+
+            # --- 用户不存在，创建新机器人用户 ---
+            print(f"🤖 正在为机器人 '{username}' 自动供给新账户...")
+            
+            private_key, public_key = generate_key_pair()
+            password_hash = generate_password_hash(password)
+            
+            while True:
+                uid = f"BOT_{_generate_uid(4)}"
+                cursor.execute("SELECT 1 FROM users WHERE uid = ?", (uid,))
+                if not cursor.fetchone():
+                    break
+            
+            cursor.execute(
+                "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (public_key, uid, username, password_hash, "BOT_SYSTEM", 0, private_key)
+            )
+            # 初始化个人资料
+            cursor.execute("INSERT INTO user_profiles (public_key) VALUES (?)", (public_key,))
+            # 初始化余额
+            cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
+
+            # --- 发放初始资金 ---
+            initial_funds = 10000.0
+            success, detail = _execute_system_tx_logic(
+                GENESIS_ACCOUNT, public_key, initial_funds, f"机器人 ({bot_type}) 初始资金", conn
+            )
+            if not success:
+                conn.rollback()
+                print(f"❌ 机器人 '{username}' 供给失败：无法发放初始资金。")
+                return False
+
+            conn.commit()
+            print(f"✅ 机器人 '{username}' (UID: {uid}) 供给成功，初始资金 {initial_funds} FC。")
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ 机器人 '{username}' 供给时发生严重错误: {e}")
+            return False
 # <<< --- 核心重构：全新的、通用的NFT验证函数 --- >>>
 def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
     """

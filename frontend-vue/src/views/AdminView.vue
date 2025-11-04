@@ -33,7 +33,15 @@ const forms = reactive({
     welcome_bonus_amount: 500,
     inviter_bonus_amount: 200
   },
-  nuke: { confirm_text: '' }
+  nuke: { confirm_text: '' },
+// <<< --- 1. (新增) 机器人表单状态 --- >>>
+bots: {
+    global_settings: {
+      bot_system_enabled: false,
+      bot_check_interval_seconds: 30
+    },
+    bot_types: {} // 将由 API 动态填充
+  }
 })
 
 // --- Computed Properties ---
@@ -78,11 +86,12 @@ async function fetchData() {
   
   // Clear success message on refresh
   successMessage.value = null;
-
-  const [usersRes, balancesRes, nftTypesRes] = await Promise.all([
+  // <<< --- 2. (修改) 并行获取机器人配置 --- >>>
+  const [usersRes, balancesRes, nftTypesRes, botConfigRes] = await Promise.all([
     apiCall('GET', '/users/list', { params: { public_key: authStore.userInfo.publicKey } }),
     apiCall('GET', '/admin/balances', { headers: adminHeaders.value }),
-    apiCall('GET', '/admin/nft/types', { headers: adminHeaders.value })
+    apiCall('GET', '/admin/nft/types', { headers: adminHeaders.value }),
+    apiCall('GET', '/admin/bots/config', { headers: adminHeaders.value }) // <-- 修改
   ]);
 
   // Process users
@@ -101,6 +110,15 @@ async function fetchData() {
       forms.mintNft.nft_type = nftTypes.value[0] // Set initial value, triggers watcher
     }
   }
+  // <<< --- 3. (新增) 处理机器人配置响应 --- >>>
+  if (botConfigRes[1]) {
+    errorMessage.value = (errorMessage.value || '') + `\n加载机器人配置失败: ${botConfigRes[1]}`
+  } else if (botConfigRes[0]) {
+    // 使用后端返回的动态结构填充表单
+    forms.bots.global_settings = botConfigRes[0].global_settings;
+    forms.bots.bot_types = botConfigRes[0].bot_types;
+  }
+  // <<< --- 新增结束 --- >>>
   
   // Fetch settings
   await fetchSettings()
@@ -117,8 +135,6 @@ async function fetchSettings() {
         }
     }
 }
-
-
 async function handleApiCall(method, endpoint, payload, successMsg) {
   successMessage.value = null
   errorMessage.value = null
@@ -127,7 +143,10 @@ async function handleApiCall(method, endpoint, payload, successMsg) {
     errorMessage.value = `操作失败: ${error}`
   } else {
     successMessage.value = `${successMsg}: ${data.detail}`
-    await fetchData() // Refresh all data
+    // 只有非机器人配置的调用才需要刷新所有数据
+    if (endpoint !== '/admin/bots/config') {
+      await fetchData()
+    }
   }
 }
 
@@ -190,7 +209,32 @@ function handleNukeSystem() {
     }
     handleApiCall('POST', '/admin/nuke_system', {}, '系统重置成功');
 }
+// <<< --- 4. (新增) 保存机器人配置的处理函数 --- >>>
+async function handleSaveBotConfig() {
+  // 创建一个干净的有效载荷，以确保类型正确
+  const payload = {
+    global_settings: {
+      bot_system_enabled: forms.bots.global_settings.bot_system_enabled,
+      bot_check_interval_seconds: Number(forms.bots.global_settings.bot_check_interval_seconds) || 30
+    },
+    bot_types: {}
+  }
 
+  // 迭代动态的机器人类型并清理它们的数据
+  for (const botName in forms.bots.bot_types) {
+    const config = forms.bots.bot_types[botName];
+    payload.bot_types[botName] = {
+      // 我们只发送回后端需要的数据
+      count: Number(config.count) || 0,
+      action_probability: Number(config.action_probability) || 0.1
+    }
+  }
+  
+  await handleApiCall('POST', '/admin/bots/config', payload, '机器人配置已保存')
+  // 保存后立即刷新，以获取可能由后端纠正的配置 (例如新添加的机器人)
+  await fetchData();
+}
+// <<< --- 新增结束 --- >>>
 
 onMounted(() => {
   isLoading.value = false;
@@ -222,6 +266,7 @@ onMounted(() => {
         <button :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户管理</button>
         <button :class="{ active: activeTab === 'nft' }" @click="activeTab = 'nft'">NFT 管理</button>
         <button :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">系统设置</button>
+        <button :class="{ active: activeTab === 'bots' }" @click="activeTab = 'bots'">🤖 机器人管理</button>
       </div>
 
       <div v-if="activeTab === 'balances'" class="tab-content">
@@ -414,6 +459,49 @@ onMounted(() => {
         </form>
       </div>
     </div>
+<div v-if="activeTab === 'bots'" class="tab-content">
+        <h2>🤖 机器人系统管理</h2>
+        <form @submit.prevent="handleSaveBotConfig" class="admin-form">
+          <h3>全局设置</h3>
+          <div class="form-group-checkbox">
+            <input type="checkbox" id="bot_system_enabled" v-model="forms.bots.global_settings.bot_system_enabled" />
+            <label for="bot_system_enabled">启用机器人系统 (Bots will activate on next cycle)</label>
+          </div>
+          <div class="form-group">
+            <label for="bot_check_interval_seconds">机器人检查间隔 (秒)</label>
+            <input id="bot_check_interval_seconds" type="number" v.model.number="forms.bots.global_settings.bot_check_interval_seconds" min="5" />
+            <p class="help-text">系统每隔这么久“唤醒”一次，然后根据各自的概率决定机器人是否行动。</p>
+          </div>
+
+          <h3 class="divider">机器人实例配置</h3>
+          
+          <div 
+            v-for="(config, botName) in forms.bots.bot_types" 
+            :key="botName" 
+            class="bot-config-group"
+          >
+            <h4>{{ botName }}</h4>
+            <p class="help-text">{{ config.description || '没有为此机器人提供描述。' }}</p>
+            <div class="grid-2-col">
+              <div class="form-group">
+                <label :for="`bot_${botName}_count`">实例数量</label>
+                <input :id="`bot_${botName}_count`" type="number" v.model.number="config.count" min="0" max="10" />
+              </div>
+              <div class="form-group">
+                <label :for="`bot_${botName}_prob`">行动概率 (0.0 - 1.0)</label>
+                <input :id="`bot_${botName}_prob`" type="number" v.model.number="config.action_probability" min="0" max="1" step="0.05" />
+              </div>
+            </div>
+          </div>
+          
+          <div v-if="!Object.keys(forms.bots.bot_types).length" class="empty-state-small">
+            后端没有注册任何机器人逻辑。
+          </div>
+
+          <button type="submit" class="save-button">保存机器人设置</button>
+        </form>
+      </div>
+      <!-- </div> -->
   </div>
 </template>
 
@@ -457,4 +545,54 @@ td { font-size: 0.9rem; }
 .message { padding: 1rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; }
 .success { color: #155724; background-color: #d4edda; }
 .error { color: #d8000c; background-color: #ffbaba; }
+/* <<< --- 7. (新增) 机器人管理面板的特定样式 --- >>> */
+.form-group-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: #f7fafc;
+  padding: 1rem;
+  border-radius: 6px;
+}
+.form-group-checkbox input[type="checkbox"] {
+  width: auto;
+  height: 1.2em;
+  width: 1.2em;
+}
+.form-group-checkbox label {
+  font-weight: 600;
+  color: #2d3748;
+}
+
+h3.divider {
+  margin-top: 2rem;
+  border-top: 1px dashed #cbd5e0;
+  padding-top: 1.5rem;
+}
+
+.bot-config-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  background-color: #fdfdfd;
+}
+.bot-config-group h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+  color: #2b6cb0;
+}
+.bot-config-group .help-text {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-style: italic;
+  color: #4a5568;
+}
+.save-button {
+  background-color: #3182ce;
+  margin-top: 1rem;
+}
+.save-button:hover {
+  background-color: #2b6cb0;
+}
 </style>
