@@ -21,7 +21,7 @@ const nftMintHelpText = ref('') // For bug #3
 
 // --- (新增) V2 机器人状态 ---
 const allBots = ref([])
-const botTypes = ref({})
+const botTypes = ref([])
 const showBotManager = ref(null) // 用于显示单个机器人的管理模态框
 
 // --- Forms ---

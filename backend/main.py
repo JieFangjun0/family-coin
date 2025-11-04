@@ -891,14 +891,14 @@ def api_perform_shop_action(request: MarketSignedRequest):
 # --- (重构) 机器人管理 API (V2) ---
 # ==============================================================================
 @app.get("/admin/bots/types", response_model=Dict, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
-async def api_admin_get_bot_types():
+def api_admin_get_bot_types():
     """
     (新增) 获取所有已注册的机器人逻辑类型。
     """
     return {"types": list(BOT_LOGIC_MAP.keys())}
 
 @app.get("/admin/bots/list", response_model=AdminBotListResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
-async def api_admin_get_bot_list():
+def api_admin_get_bot_list():
     """
     (新增) 获取所有已创建的机器人实例列表。
     """
@@ -910,7 +910,7 @@ async def api_admin_get_bot_list():
     return AdminBotListResponse(bots=bots)
 
 @app.post("/admin/bots/create", response_model=AdminBotInfo, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
-async def api_admin_create_bot(request: AdminCreateBotRequest):
+def api_admin_create_bot(request: AdminCreateBotRequest):
     """
     (新增) 创建一个新的机器人实例。
     """
@@ -937,7 +937,7 @@ async def api_admin_create_bot(request: AdminCreateBotRequest):
     return AdminBotInfo(**new_bot_info)
 
 @app.post("/admin/bots/set_config", response_model=SuccessResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
-async def api_admin_set_bot_config(request: AdminSetBotConfigRequest):
+def api_admin_set_bot_config(request: AdminSetBotConfigRequest):
     """
     (新增) 更新一个机器人的行动概率。
     """

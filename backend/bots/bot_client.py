@@ -101,6 +101,15 @@ class BotClient:
         data, error = await self.api_call('GET', '/nfts/my', params={"public_key": self.public_key})
         return data.get('nfts', []) if data else []
 
+    # +++ 在这里添加新方法 +++
+    async def get_my_activity(self) -> tuple[List[dict], List[dict]]:
+        """(新增) 获取机器人自己的市场活动。"""
+        data, error = await self.api_call('GET', '/market/my_activity', params={"public_key": self.public_key})
+        if error:
+            print(f"❌ Bot '{self.username}' 无法获取 /market/my_activity: {error}")
+            return [], [] # 返回空列表以防止崩溃
+        return data.get('listings', []), data.get('offers', [])
+    # +++ 添加结束 +++
     async def get_market_listings(self, listing_type: str) -> List[dict]:
         data, error = await self.api_call('GET', '/market/listings', params={
             "listing_type": listing_type,
