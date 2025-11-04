@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, reactive } from 'vue'
+import { ref, onMounted, computed, reactive, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
@@ -26,8 +26,15 @@ const myActivity = ref({ listings: [], offers: [] })
 const myOffersDetails = ref({}) 
 const auctionBidHistory = reactive({})
 
-// +++ 核心修改 (请求 2): 新增状态，用于切换显示已完成的交易 +++
 const showInactiveListings = ref(false)
+
+// +++ 修复请求 2: 为每个商店板块添加子标签页状态 +++
+const activeMintTab = ref(null)
+const activeBuyTab = ref(null)
+const activeAuctionTab = ref(null)
+const activeSeekTab = ref(null)
+// +++ 修复结束 +++
+
 
 // --- 表单 ---
 const mintForms = ref({})
@@ -52,18 +59,14 @@ const isLoading = ref({
 })
 
 // --- Computed ---
+
+// (sortedMyListings 保持不变)
 const sortedMyListings = computed(() => {
   if (!myActivity.value.listings) return []
-  
-  // +++ 核心修改 (请求 2): 过滤非活跃的挂单 +++
   const filtered = myActivity.value.listings.filter(item => {
-    if (showInactiveListings.value) {
-      return true; // 显示所有
-    }
-    return item.status === 'ACTIVE'; // 默认只显示活跃
+    if (showInactiveListings.value) return true;
+    return item.status === 'ACTIVE';
   });
-  
-  // 排序过滤后的列表
   return [...filtered].sort((a, b) => {
     if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1
     if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1
@@ -74,6 +77,70 @@ const sortedMyListings = computed(() => {
 const computedEligibleNfts = (seekNftType) => {
   return myNfts.value.filter(nft => nft.nft_type === seekNftType && nft.status === 'ACTIVE');
 }
+
+// +++ 修复请求 2: 为商店板块添加分组和排序 +++
+
+// --- 分组辅助函数 ---
+const groupListingsByType = (listings) => {
+  const groups = {}
+  for (const item of listings) {
+    if (!groups[item.nft_type]) {
+      groups[item.nft_type] = []
+    }
+    groups[item.nft_type].push(item)
+  }
+  return groups
+}
+
+// --- 铸造工坊 (Creatable) ---
+const creatableNftsByType = computed(() => {
+  // creatableNfts 已经是按类型分组的对象，但值是 config，我们将其转为数组
+  const groups = {}
+  for (const nftType in creatableNfts.value) {
+    groups[nftType] = [creatableNfts.value[nftType]] // 将 config 包装在数组中以便 v-for
+  }
+  return groups
+})
+const sortedCreatableTypes = computed(() => {
+  const keys = Object.keys(creatableNftsByType.value).sort()
+  if (activeMintTab.value === null && keys.length > 0) {
+    activeMintTab.value = keys[0]
+  }
+  return keys
+})
+
+// --- 一口价 (Sale) ---
+const saleListingsByType = computed(() => groupListingsByType(saleListings.value))
+const sortedSaleTypes = computed(() => {
+  const keys = Object.keys(saleListingsByType.value).sort()
+  if (activeBuyTab.value === null && keys.length > 0) {
+    activeBuyTab.value = keys[0]
+  }
+  return keys
+})
+
+// --- 拍卖行 (Auction) ---
+const auctionListingsByType = computed(() => groupListingsByType(auctionListings.value))
+const sortedAuctionTypes = computed(() => {
+  const keys = Object.keys(auctionListingsByType.value).sort()
+  if (activeAuctionTab.value === null && keys.length > 0) {
+    activeAuctionTab.value = keys[0]
+  }
+  return keys
+})
+
+// --- 求购 (Seek) ---
+const seekListingsByType = computed(() => groupListingsByType(seekListings.value))
+const sortedSeekTypes = computed(() => {
+  const keys = Object.keys(seekListingsByType.value).sort()
+  if (activeSeekTab.value === null && keys.length > 0) {
+    activeSeekTab.value = keys[0]
+  }
+  return keys
+})
+
+// +++ 修复结束 +++
+
 
 // --- 翻译 ---
 const LISTING_TYPE_MAP = { "SALE": "一口价", "AUCTION": "拍卖", "SEEK": "求购" }
@@ -86,26 +153,19 @@ function translateStatus(status) { return STATUS_MAP[status] || status }
 
 async function fetchDataForTab(tab) {
   errorMessage.value = null;
-  // successMessage.value = null; // 切换tab时不清除成功消息
   switch (tab) {
     case 'mint':
       if (Object.keys(creatableNfts.value).length === 0) {
-        if (Object.keys(allNftTypes.value).length === 0) {
-          await Promise.all([fetchCreatableNfts(), fetchAllNftTypes()]);
-        } else {
-          await fetchCreatableNfts();
-        }
+        await Promise.all([fetchCreatableNfts(), fetchAllNftTypes()]);
       }
       break;
     case 'buy':
-      // +++ 核心修改 (请求 1): 确保加载NFT名称 +++
       await Promise.all([
         fetchSaleListings(),
         fetchAllNftTypes()
       ]);
       break;
     case 'auction': 
-      // +++ 核心修改 (请求 1): 确保加载NFT名称 +++
       await Promise.all([
         fetchAuctionListings(),
         fetchAllNftTypes()
@@ -119,7 +179,10 @@ async function fetchDataForTab(tab) {
       ]);
       break;
     case 'my-listings':
-      await fetchMyActivity();
+      await Promise.all([
+        fetchMyActivity(),
+        fetchAllNftTypes() // 确保我的交易页也能显示中文
+      ]);
       break;
   }
 }
@@ -136,6 +199,7 @@ async function fetchBalance() {
 
 async function fetchCreatableNfts() {
   isLoading.value.mint = true
+  activeMintTab.value = null // 重置tab
   const [data, error] = await apiCall('GET', '/market/creatable_nfts')
   if (error) {
     errorMessage.value = `无法加载可铸造物品: ${error}`
@@ -155,6 +219,7 @@ async function fetchCreatableNfts() {
 
 async function fetchSaleListings() {
   isLoading.value.buy = true
+  activeBuyTab.value = null // 重置tab
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'SALE' }
   })
@@ -165,6 +230,7 @@ async function fetchSaleListings() {
 
 async function fetchAuctionListings() {
   isLoading.value.auction = true
+  activeAuctionTab.value = null // 重置tab
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'AUCTION' }
   })
@@ -183,6 +249,7 @@ async function fetchAuctionListings() {
 
 async function fetchSeekListings() {
   isLoading.value.seek = true
+  activeSeekTab.value = null // 重置tab
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'SEEK' }
   })
@@ -234,6 +301,7 @@ async function fetchMyActivity() {
 }
 
 // --- 事件处理 ---
+// (所有 handle... 函数保持不变)
 
 function selectTab(tab) {
   activeTab.value = tab
@@ -512,91 +580,118 @@ onMounted(() => {
 
     <div v-if="activeTab === 'mint'" class="tab-content">
       <div v-if="isLoading.mint" class="loading-state">正在加载铸造工坊...</div>
-      <div v-else-if="!creatableNfts || Object.keys(creatableNfts).length === 0" class="empty-state">
+      <div v-else-if="!sortedCreatableTypes || sortedCreatableTypes.length === 0" class="empty-state">
         当前没有可通过商店铸造的NFT类型。
       </div>
-      <div v-else class="nft-grid full-width-grid">
-        <div v-for="(config, nftType) in creatableNfts" :key="nftType" class="nft-card">
-          <div class="nft-header">
-            <span class="nft-type">{{ allNftTypes[nftType] || nftType }}</span>
-            <span class="nft-price">{{ formatCurrency(config.cost) }} FC</span>
-          </div>
-          <h3 class="nft-name">{{ config.name }}</h3>
-          <p class="nft-description">{{ config.description }}</p>
-
-          <form @submit.prevent="handleMintNft(nftType, config)" class="mint-form">
-            <template v-if="config.fields && config.fields.length > 0">
-              <div v-for="field in config.fields" :key="field.name" class="form-group">
-                <label :for="`${nftType}-${field.name}`">{{ field.label }}</label>
-                
-                <input 
-                  v-if="field.type === 'text_input'" 
-                  type="text" 
-                  :id="`${nftType}-${field.name}`"
-                  v-model="mintForms[nftType][field.name]"
-                  :required="field.required"
-                  :placeholder="field.help"
-                />
-                
-                <textarea 
-                  v-if="field.type === 'text_area'" 
-                  :id="`${nftType}-${field.name}`"
-                  v-model="mintForms[nftType][field.name]"
-                  :required="field.required"
-                  :placeholder="field.help"
-                  rows="3"
-                ></textarea>
-                
-                <input 
-                  v-if="field.type === 'number_input'" 
-                  type="number" 
-                  :id="`${nftType}-${field.name}`"
-                  v-model.number="mintForms[nftType][field.name]"
-                  :required="field.required"
-                  :min="field.min_value"
-                  :max="field.max_value"
-                  :step="field.step"
-                />
-                
-                <p v-if="field.help && field.type !== 'text_input' && field.type !== 'text_area'" class="help-text">{{ field.help }}</p>
+      <div v-else>
+        <div class="tabs sub-tabs" v-if="sortedCreatableTypes.length > 1">
+          <button
+            v-for="nftType in sortedCreatableTypes"
+            :key="nftType"
+            :class="{ active: activeMintTab === nftType }"
+            @click="activeMintTab = nftType"
+          >
+            {{ allNftTypes[nftType] || nftType }} ({{ creatableNftsByType[nftType].length }})
+          </button>
+        </div>
+        
+        <div v-for="nftType in sortedCreatableTypes" :key="nftType" v-show="activeMintTab === nftType" class="tab-content">
+          <div class="nft-grid full-width-grid">
+            <div v-for="config in creatableNftsByType[nftType]" :key="nftType" class="nft-card">
+              <div class="nft-header">
+                <span class="nft-type">{{ allNftTypes[nftType] || nftType }}</span>
+                <span class="nft-price">{{ formatCurrency(config.cost) }} FC</span>
               </div>
-            </template>
-            <button type="submit" :disabled="balance < config.cost">
-              {{ balance < config.cost ? '余额不足' : (config.action_label || '支付并铸造') }}
-            </button>
-          </form>
+              <h3 class="nft-name">{{ config.name }}</h3>
+              <p class="nft-description">{{ config.description }}</p>
+
+              <form @submit.prevent="handleMintNft(nftType, config)" class="mint-form">
+                <template v-if="config.fields && config.fields.length > 0">
+                  <div v-for="field in config.fields" :key="field.name" class="form-group">
+                    <label :for="`${nftType}-${field.name}`">{{ field.label }}</label>
+                    <input 
+                      v-if="field.type === 'text_input'" 
+                      type="text" 
+                      :id="`${nftType}-${field.name}`"
+                      v-model="mintForms[nftType][field.name]"
+                      :required="field.required"
+                      :placeholder="field.help"
+                    />
+                    <textarea 
+                      v-if="field.type === 'text_area'" 
+                      :id="`${nftType}-${field.name}`"
+                      v-model="mintForms[nftType][field.name]"
+                      :required="field.required"
+                      :placeholder="field.help"
+                      rows="3"
+                    ></textarea>
+                    <input 
+                      v-if="field.type === 'number_input'" 
+                      type="number" 
+                      :id="`${nftType}-${field.name}`"
+                      v-model.number="mintForms[nftType][field.name]"
+                      :required="field.required"
+                      :min="field.min_value"
+                      :max="field.max_value"
+                      :step="field.step"
+                    />
+                    <p v-if="field.help && field.type !== 'text_input' && field.type !== 'text_area'" class="help-text">{{ field.help }}</p>
+                  </div>
+                </template>
+                <button type="submit" :disabled="balance < config.cost">
+                  {{ balance < config.cost ? '余额不足' : (config.action_label || '支付并铸造') }}
+                </button>
+              </form>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+    
     <div v-if="activeTab === 'buy'" class="tab-content">
       <div v-if="isLoading.buy" class="loading-state">正在加载市场数据...</div>
-      <div v-else-if="!saleListings || saleListings.length === 0" class="empty-state">
+      <div v-else-if="!sortedSaleTypes || sortedSaleTypes.length === 0" class="empty-state">
         市场上目前没有任何挂单。
       </div>
-      <div v-else class="nft-grid">
-        <div v-for="item in saleListings" :key="item.listing_id" class="nft-card buy-card">
-          <div class="nft-header">
-            <span class="nft-type">{{ allNftTypes[item.nft_type] || item.nft_type }}</span>
-            <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
-          </div>
-          <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
-          
-          <template v-if="item.nft_data">
-              <MarketNftDetail :item="item" />
-          </template>
+      <div v-else>
+        <div class="tabs sub-tabs" v-if="sortedSaleTypes.length > 1">
+          <button
+            v-for="nftType in sortedSaleTypes"
+            :key="nftType"
+            :class="{ active: activeBuyTab === nftType }"
+            @click="activeBuyTab = nftType"
+          >
+            {{ allNftTypes[nftType] || nftType }} ({{ saleListingsByType[nftType].length }})
+          </button>
+        </div>
 
-          <ul class="nft-data">
-            <li><strong>卖家:</strong> 
-                <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
-                <span v-if="item.lister_key === authStore.userInfo.publicKey" class="my-item-tag">(这是你)</span>
-            </li>
-            <li><strong>上架于:</strong> {{ formatTimestamp(item.created_at) }}</li>
-          </ul>
+        <div v-for="nftType in sortedSaleTypes" :key="nftType" v-show="activeBuyTab === nftType" class="tab-content">
+          <div class="nft-grid">
+            <div v-for="item in saleListingsByType[nftType]" :key="item.listing_id" class="nft-card buy-card">
+              <div class="nft-header">
+                <span class="nft-type">{{ allNftTypes[item.nft_type] || item.nft_type }}</span>
+                <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
+              </div>
+              <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
+              
+              <template v-if="item.nft_data">
+                  <MarketNftDetail :item="item" />
+              </template>
 
-          <div class="buy-action">
-            <button @click="handleBuyNft(item)" :disabled="balance < item.price || item.lister_key === authStore.userInfo.publicKey">
-              {{ item.lister_key === authStore.userInfo.publicKey ? '你自己的商品' : '立即购买' }}
-            </button>
+              <ul class="nft-data">
+                <li><strong>卖家:</strong> 
+                    <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
+                    <span v-if="item.lister_key === authStore.userInfo.publicKey" class="my-item-tag">(这是你)</span>
+                </li>
+                <li><strong>上架于:</strong> {{ formatTimestamp(item.created_at) }}</li>
+              </ul>
+
+              <div class="buy-action">
+                <button @click="handleBuyNft(item)" :disabled="balance < item.price || item.lister_key === authStore.userInfo.publicKey">
+                  {{ item.lister_key === authStore.userInfo.publicKey ? '你自己的商品' : '立即购买' }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -604,64 +699,79 @@ onMounted(() => {
 
     <div v-if="activeTab === 'auction'" class="tab-content">
       <div v-if="isLoading.auction" class="loading-state">正在加载拍卖行数据...</div>
-      <div v-else-if="!auctionListings || auctionListings.length === 0" class="empty-state">
+      <div v-else-if="!sortedAuctionTypes || sortedAuctionTypes.length === 0" class="empty-state">
         拍卖行目前没有任何物品。
       </div>
-      <div v-else class="nft-grid">
-        <div v-for="item in auctionListings" :key="item.listing_id" class="nft-card auction-card">
-          <div class="nft-header">
-            <span class="nft-type-auction">拍卖: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
-            <span class="nft-price">{{ item.highest_bid > 0 ? '当前' : '起拍' }}: {{ formatCurrency(item.highest_bid || item.price) }} FC</span>
-          </div>
-          <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
-          
-          <template v-if="item.nft_data">
-              <MarketNftDetail :item="item" />
-          </template>
+      <div v-else>
+        <div class="tabs sub-tabs" v-if="sortedAuctionTypes.length > 1">
+          <button
+            v-for="nftType in sortedAuctionTypes"
+            :key="nftType"
+            :class="{ active: activeAuctionTab === nftType }"
+            @click="activeAuctionTab = nftType"
+          >
+            {{ allNftTypes[nftType] || nftType }} ({{ auctionListingsByType[nftType].length }})
+          </button>
+        </div>
+        
+        <div v-for="nftType in sortedAuctionTypes" :key="nftType" v-show="activeAuctionTab === nftType" class="tab-content">
+          <div class="nft-grid">
+            <div v-for="item in auctionListingsByType[nftType]" :key="item.listing_id" class="nft-card auction-card">
+              <div class="nft-header">
+                <span class="nft-type-auction">拍卖: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
+                <span class="nft-price">{{ item.highest_bid > 0 ? '当前' : '起拍' }}: {{ formatCurrency(item.highest_bid || item.price) }} FC</span>
+              </div>
+              <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
+              
+              <template v-if="item.nft_data">
+                  <MarketNftDetail :item="item" />
+              </template>
 
-          <ul class="nft-data">
-            <li><strong>卖家:</strong> 
-                <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
-                <span v-if="item.lister_key === authStore.userInfo.publicKey" class="my-item-tag">(这是你)</span>
-            </li>
-            <li><strong>结束于:</strong> <span class="countdown">{{ formatTimestamp(item.end_time) }}</span></li>
-            <li v-if="item.highest_bidder">
-              <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} FC
-              <button class="link-button" @click.prevent="fetchBidHistory(item.listing_id)">
-                ({{ auctionBidHistory[item.listing_id]?.show ? '隐藏' : '查看' }}历史)
-              </button>
-            </li>
-            <li v-else><strong>最高出价:</strong> 暂无出价</li>
-          </ul>
+              <ul class="nft-data">
+                <li><strong>卖家:</strong> 
+                    <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
+                    <span v-if="item.lister_key === authStore.userInfo.publicKey" class="my-item-tag">(这是你)</span>
+                </li>
+                <li><strong>结束于:</strong> <span class="countdown">{{ formatTimestamp(item.end_time) }}</span></li>
+                <li v-if="item.highest_bidder">
+                  <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} FC
+                  <button class="link-button" @click.prevent="fetchBidHistory(item.listing_id)">
+                    ({{ auctionBidHistory[item.listing_id]?.show ? '隐藏' : '查看' }}历史)
+                  </button>
+                </li>
+                <li v-else><strong>最高出价:</strong> 暂无出价</li>
+              </ul>
 
-          <div v-if="auctionBidHistory[item.listing_id]?.show" class="bid-history">
-            <div v-if="auctionBidHistory[item.listing_id].isLoading" class="loading-state-small">加载历史...</div>
-            <ul v-else-if="auctionBidHistory[item.listing_id].bids.length > 0" class="offers-list">
-              <li v-for="(bid, index) in auctionBidHistory[item.listing_id].bids" :key="index">
-                <div class="offer-info">
-                  <ClickableUsername :uid="bid.bidder_uid" :username="bid.bidder_username" />
-                  <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} FC</strong></span>
-                  <span class="bid-time">@ {{ formatTimestamp(bid.created_at) }}</span>
+              <div v-if="auctionBidHistory[item.listing_id]?.show" class="bid-history">
+                <div v-if="auctionBidHistory[item.listing_id].isLoading" class="loading-state-small">加载历史...</div>
+                <ul v-else-if="auctionBidHistory[item.listing_id].bids.length > 0" class="offers-list">
+                  <li v-for="(bid, index) in auctionBidHistory[item.listing_id].bids" :key="index">
+                    <div class="offer-info">
+                      <ClickableUsername :uid="bid.bidder_uid" :username="bid.bidder_username" />
+                      <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} FC</strong></span>
+                      <span class="bid-time">@ {{ formatTimestamp(bid.created_at) }}</span>
+                    </div>
+                  </li>
+                </ul>
+                <div v-else class="empty-state-small">暂无出价记录</div>
+              </div>
+
+              <form class="buy-action" @submit.prevent="handlePlaceBid(item)">
+                <div class="form-group small-form-group">
+                    <input 
+                        type="number" 
+                        v-model.number="bidForms[item.listing_id]" 
+                        :min="parseFloat(((item.highest_bid || item.price) + 0.01).toFixed(2))" 
+                        step="0.01" 
+                        required 
+                    />
                 </div>
-              </li>
-            </ul>
-            <div v-else class="empty-state-small">暂无出价记录</div>
-          </div>
-
-          <form class="buy-action" @submit.prevent="handlePlaceBid(item)">
-            <div class="form-group small-form-group">
-                <input 
-                    type="number" 
-                    v-model.number="bidForms[item.listing_id]" 
-                    :min="parseFloat(((item.highest_bid || item.price) + 0.01).toFixed(2))" 
-                    step="0.01" 
-                    required 
-                />
+                <button type="submit" :disabled="balance < (bidForms[item.listing_id] || 0) || item.lister_key === authStore.userInfo.publicKey">
+                  {{ item.lister_key === authStore.userInfo.publicKey ? '你自己的商品' : '出价' }}
+                </button>
+              </form>
             </div>
-            <button type="submit" :disabled="balance < (bidForms[item.listing_id] || 0) || item.lister_key === authStore.userInfo.publicKey">
-              {{ item.lister_key === authStore.userInfo.publicKey ? '你自己的商品' : '出价' }}
-            </button>
-          </form>
+          </div>
         </div>
       </div>
     </div>
@@ -694,54 +804,68 @@ onMounted(() => {
 
       <h3 class="divider-header">市场求购列表</h3>
       <div v-if="isLoading.seek" class="loading-state">正在加载求购数据...</div>
-      <div v-else-if="!seekListings || seekListings.length === 0" class="empty-state">
+      <div v-else-if="!sortedSeekTypes || sortedSeekTypes.length === 0" class="empty-state">
         市场上目前没有任何求购信息。
       </div>
-      <div v-else class="nft-grid">
-        <div v-for="item in seekListings" :key="item.listing_id" class="nft-card seek-card">
-          <div class="nft-header">
-            <span class="nft-type-seek">求购: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
-            <span class="nft-price">预算: {{ formatCurrency(item.price) }} FC</span>
-          </div>
-          <h3 class="nft-name">“{{ item.description }}”</h3>
-
-          <ul class="nft-data">
-            <li><strong>求购方:</strong> 
-                <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
-                <span v-if="item.lister_key === authStore.userInfo.publicKey" class="my-item-tag">(这是你)</span>
-            </li>
-            <li><strong>发布于:</strong> {{ formatTimestamp(item.created_at) }}</li>
-          </ul>
-          
-          <form v-if="item.lister_key !== authStore.userInfo.publicKey" class="buy-action" @submit.prevent="handleMakeOffer(item)">
-            <p class="help-text">选择一个你拥有的、符合类型的NFT进行报价：</p>
-            <template v-if="isLoading.myNfts">
-              <div class="loading-state-small">正在加载你的NFT...</div>
-            </template>
-            <template v-else-if="computedEligibleNfts(item.nft_type).length > 0">
-              <div class="form-group small-form-group">
-                <select v-model="offerForms[item.listing_id]" required>
-                    <option :value="null" disabled>-- 选择你的 {{ allNftTypes[item.nft_type] }} --</option>
-                    <option v-for="nft in computedEligibleNfts(item.nft_type)" :key="nft.nft_id" :value="nft.nft_id">
-                        {{ nft.data.custom_name || nft.data.name || nft.nft_id.substring(0, 8) }}
-                    </option>
-                </select>
+      <div v-else>
+         <div class="tabs sub-tabs" v-if="sortedSeekTypes.length > 1">
+          <button
+            v-for="nftType in sortedSeekTypes"
+            :key="nftType"
+            :class="{ active: activeSeekTab === nftType }"
+            @click="activeSeekTab = nftType"
+          >
+            {{ allNftTypes[nftType] || nftType }} ({{ seekListingsByType[nftType].length }})
+          </button>
+        </div>
+        
+        <div v-for="nftType in sortedSeekTypes" :key="nftType" v-show="activeSeekTab === nftType" class="tab-content">
+          <div class="nft-grid">
+            <div v-for="item in seekListingsByType[nftType]" :key="item.listing_id" class="nft-card seek-card">
+              <div class="nft-header">
+                <span class="nft-type-seek">求购: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
+                <span class="nft-price">预算: {{ formatCurrency(item.price) }} FC</span>
               </div>
-              <button type="submit">
-                提交报价
-              </button>
-            </template>
-            <div v-else class="empty-state-small">
-              你没有符合条件的NFT
+              <h3 class="nft-name">“{{ item.description }}”</h3>
+
+              <ul class="nft-data">
+                <li><strong>求购方:</strong> 
+                    <ClickableUsername :uid="item.lister_uid" :username="item.lister_username" />
+                    <span v-if="item.lister_key === authStore.userInfo.publicKey" class="my-item-tag">(这是你)</span>
+                </li>
+                <li><strong>发布于:</strong> {{ formatTimestamp(item.created_at) }}</li>
+              </ul>
+              
+              <form v-if="item.lister_key !== authStore.userInfo.publicKey" class="buy-action" @submit.prevent="handleMakeOffer(item)">
+                <p class="help-text">选择一个你拥有的、符合类型的NFT进行报价：</p>
+                <template v-if="isLoading.myNfts">
+                  <div class="loading-state-small">正在加载你的NFT...</div>
+                </template>
+                <template v-else-if="computedEligibleNfts(item.nft_type).length > 0">
+                  <div class="form-group small-form-group">
+                    <select v-model="offerForms[item.listing_id]" required>
+                        <option :value="null" disabled>-- 选择你的 {{ allNftTypes[item.nft_type] }} --</option>
+                        <option v-for="nft in computedEligibleNfts(item.nft_type)" :key="nft.nft_id" :value="nft.nft_id">
+                            {{ nft.data.custom_name || nft.data.name || nft.nft_id.substring(0, 8) }}
+                        </option>
+                    </select>
+                  </div>
+                  <button type="submit">
+                    提交报价
+                  </button>
+                </template>
+                <div v-else class="empty-state-small">
+                  你没有符合条件的NFT
+                </div>
+              </form>
+              <div v-else class="buy-action empty-state-small">
+                这是你自己的求购单
+              </div>
             </div>
-          </form>
-          <div v-else class="buy-action empty-state-small">
-            这是你自己的求购单
           </div>
         </div>
       </div>
     </div>
-
 
     <div v-if="activeTab === 'my-listings'" class="tab-content">
         <div v-if="isLoading.myListings" class="loading-state">正在加载我的交易...</div>
@@ -859,6 +983,35 @@ onMounted(() => {
 .tabs button:hover { color: #4a5568; }
 .tabs button.active { color: #42b883; border-bottom-color: #42b883; }
 
+/* +++ 修复请求 2: 新增子标签页样式 +++ */
+.tabs.sub-tabs {
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  border-bottom-width: 1px;
+}
+.tabs.sub-tabs button {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  color: #4a5568;
+  border-bottom-width: 2px;
+  transform: translateY(1px);
+  flex-grow: 0; /* 子标签不自动撑开 */
+  flex-basis: auto;
+}
+.tabs.sub-tabs button.active {
+  color: #42b883;
+  border-bottom-color: #42b883;
+}
+.tab-content {
+  animation: fadeIn 0.3s;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* +++ 修复结束 +++ */
+
+
 .loading-state, .empty-state { text-align: center; padding: 3rem; color: #718096; font-size: 1.1rem; }
 .loading-state-small, .empty-state-small { text-align: center; padding: 1rem; color: #718096; font-size: 0.9rem; }
 
@@ -962,7 +1115,6 @@ button:disabled { background-color: #a0aec0; cursor: not-allowed; }
   flex-wrap: nowrap;
 }
 
-/* +++ 核心修改 (请求 2): 切换开关样式 +++ */
 .filter-toggle {
   margin-bottom: 1.5rem;
   padding: 1rem;

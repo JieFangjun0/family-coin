@@ -161,8 +161,6 @@ onMounted(fetchData)
 /* +++ 核心修改 (请求 3b): 调整布局宽度 +++ */
 .profile-view { max-width: 900px; margin: 0 auto; }
 .profile-form { background: #fff; padding: 2rem; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 1.5rem; max-width: 900px; } /* 确保表单也变宽 */
-.form-group { display: flex; flex-direction: column; gap: 0.5rem; }
-/* 移除旧的 select[multiple] 样式 */
 .view-profile-link {
     margin-bottom: 2rem;
 }
@@ -253,4 +251,55 @@ onMounted(fetchData)
   color: white;
   text-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
+
+/* --- (以下是为请求 4 新增的样式) --- */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+label {
+  font-weight: 500;
+  color: #4a5568;
+}
+textarea {
+  padding: 0.85rem;
+  border: 1px solid #cbd5e0; /* 统一边框颜色 */
+  border-radius: 6px; /* 统一圆角 */
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+textarea:focus {
+  border-color: #42b883;
+  box-shadow: 0 0 0 1px #42b883;
+  outline: none;
+}
+button[type="submit"] {
+  padding: 0.85rem;
+  background-color: #42b883;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+  width: 100%; /* 使其占满宽度 */
+  box-sizing: border-box;
+}
+button[type="submit"]:hover {
+  background-color: #369b6e;
+}
+button[type="submit"]:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* (全局消息样式，以防万一) */
+.message { padding: 1rem; border-radius: 4px; text-align: center; font-weight: 500; margin-bottom: 1rem;}
+.success { color: #155724; background-color: #d4edda; }
+.error { color: #d8000c; background-color: #ffbaba; }
 </style>

@@ -8,6 +8,15 @@ const props = defineProps({
 
 const emit = defineEmits(['action'])
 
+// +++ 修复请求 3：添加中文映射 +++
+const ANOMALY_NAMES = {
+  "GEO_ACTIVITY": "异常地质活动",
+  "HIGH_ENERGY": "高频能量读数",
+  "BIO_SIGN": "微弱的生命信号",
+  "RHYTHMIC_PULSE": "有节律的电磁脉冲"
+}
+// +++ 修复结束 +++
+
 // *** 核心修改：重构表单状态 ***
 const form = reactive({
   list: {
@@ -53,7 +62,6 @@ function handleScan() {
 
 <template>
   <div class="nft-header">
-    <span class="nft-type">PLANET</span>
     <h3 class="nft-name">🪐 {{ displayName }}</h3>
   </div>
 
@@ -75,9 +83,9 @@ function handleScan() {
             <div class="form-group">
                 <select v-model="form.scan.selectedAnomaly">
                     <option v-for="anomaly in nft.data.anomalies" :key="anomaly" :value="anomaly">
-                        {{ anomaly }}
+                        {{ ANOMALY_NAMES[anomaly] || anomaly }}
                     </option>
-                </select>
+                    </select>
             </div>
             <button type="submit">🚀 启动扫描</button>
         </form>

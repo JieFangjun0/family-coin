@@ -71,7 +71,6 @@ function handleDestroy() {
 
 <template>
     <div class="nft-header">
-      <span class="nft-type">SECRET_WISH</span>
       <h3 class="nft-name">{{ nft.data?.description || '[无描述]' }}</h3>
     </div>
 
