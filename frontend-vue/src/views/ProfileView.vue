@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
+// +++ 核心修改 (请求 3b): 导入 NftCard +++
+import NftCard from '@/components/nfts/NftCard.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -33,7 +35,8 @@ async function fetchData() {
   } else {
     myProfile.value = profileRes[0]
     form.value.signature = myProfile.value.signature || ''
-    form.value.selectedNftIds = myProfile.value.displayed_nfts_details.map(nft => nft.nft_id)
+    // 修复：确保 selectedNftIds 始终是一个数组
+    form.value.selectedNftIds = (myProfile.value.displayed_nfts_details || []).map(nft => nft.nft_id)
   }
 
   if (nftsRes[1]) {
@@ -45,12 +48,30 @@ async function fetchData() {
   isLoading.value = false
 }
 
-const nftOptions = computed(() => {
-    return myNfts.value.map(nft => ({
-        text: `${nft.data.custom_name || nft.data.name || nft.nft_type} (${nft.nft_id.substring(0, 6)})`,
-        value: nft.nft_id
-    }));
-});
+// --- 核心修改 (请求 3b): 移除旧的 nftOptions computed ---
+
+// +++ 核心修改 (请求 3b): 新增NFT点选处理函数 +++
+function toggleNftSelection(nftId) {
+  const index = form.value.selectedNftIds.indexOf(nftId);
+  if (index > -1) {
+    // 已选中, 取消选择
+    form.value.selectedNftIds.splice(index, 1);
+  } else {
+    // 未选中, 添加选择 (并检查限制)
+    if (form.value.selectedNftIds.length < 6) {
+      form.value.selectedNftIds.push(nftId);
+    } else {
+      // 可以在这里显示一个更友好的提示，但 alert 是最简单的
+      alert("最多只能选择 6 个NFT进行展出。");
+    }
+  }
+}
+
+// +++ 核心修改 (请求 3b): 新增辅助函数检查是否选中 +++
+const isNftSelected = (nftId) => {
+  return form.value.selectedNftIds.includes(nftId);
+}
+// +++ 修改结束 +++
 
 
 async function handleProfileUpdate() {
@@ -80,7 +101,6 @@ async function handleProfileUpdate() {
   }
 }
 
-// 核心修正：跳转到自己的社区页面
 function viewMyProfile() {
     router.push({ name: 'community', params: { uid: authStore.userInfo.uid }})
 }
@@ -111,29 +131,126 @@ onMounted(fetchData)
       </div>
 
       <div class="form-group">
-        <label>选择要展出的NFT (最多6个)</label>
-         <select v-model="form.selectedNftIds" multiple size="8">
-            <option v-for="opt in nftOptions" :key="opt.value" :value="opt.value">
-                {{ opt.text }}
-            </option>
-         </select>
+        <label>选择要展出的NFT (已选 {{ form.selectedNftIds.length }} / 6)</label>
+        <div v-if="!myNfts || myNfts.length === 0" class="empty-state">
+          你还没有任何NFT可供展出。
+        </div>
+        <div v-else class="nft-selection-grid">
+          <div
+            v-for="nft in myNfts"
+            :key="nft.nft_id"
+            class="nft-preview-card"
+            :class="{ selected: isNftSelected(nft.nft_id) }"
+            @click="toggleNftSelection(nft.nft_id)"
+          >
+            <div class="nft-card-wrapper">
+              <NftCard :nft="nft" context="profile" />
+            </div>
+            <div class="selection-overlay">
+              <div class="selection-checkmark">✔️</div>
+            </div>
+          </div>
+        </div>
       </div>
-
       <button type="submit">保存更改</button>
     </form>
   </div>
 </template>
 
 <style scoped>
-.profile-view { max-width: 700px; margin: 0 auto; }
-.profile-form { background: #fff; padding: 2rem; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 1.5rem; }
+/* +++ 核心修改 (请求 3b): 调整布局宽度 +++ */
+.profile-view { max-width: 900px; margin: 0 auto; }
+.profile-form { background: #fff; padding: 2rem; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 1.5rem; max-width: 900px; } /* 确保表单也变宽 */
 .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
-select[multiple] { height: 180px; }
+/* 移除旧的 select[multiple] 样式 */
 .view-profile-link {
     margin-bottom: 2rem;
 }
 .view-profile-link button {
     width: 100%;
     background-color: #718096;
+}
+
+/* +++ 核心修改 (请求 3b): 新增点选网格样式 +++ */
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: #718096;
+  background: #f7fafc;
+  border-radius: 6px;
+  border: 1px dashed #e2e8f0;
+}
+
+.nft-selection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  max-height: 600px; /* 如果NFT太多，允许滚动 */
+  overflow-y: auto;
+  background: #f7fafc;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.nft-preview-card {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 3px solid transparent;
+  transition: border-color 0.2s, transform 0.2s;
+  background: #fff; /* NftCard 是透明的，给个背景 */
+}
+
+.nft-preview-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.nft-preview-card.selected {
+  border-color: #42b883;
+  box-shadow: 0 0 15px rgba(66, 184, 131, 0.5);
+}
+
+.nft-card-wrapper {
+  /* 阻止 NftCard 内部的链接等被点击 */
+  pointer-events: none; 
+  display: block; 
+  height: 100%;
+}
+
+/* 使用 :deep() 确保 NftCard 组件能正确填充
+  我们在 NftCard.vue 中看到 .nft-card 是根元素
+*/
+:deep(.nft-card) {
+    height: 100%; 
+    box-shadow: none; /* 移除 NftCard 的默认阴影 */
+    border: none; /* 移除 NftCard 的默认边框 */
+}
+
+.selection-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(66, 184, 131, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none; /* 允许点击穿透 */
+}
+
+.nft-preview-card.selected .selection-overlay {
+  opacity: 1;
+}
+
+.selection-checkmark {
+  font-size: 3rem;
+  color: white;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 </style>

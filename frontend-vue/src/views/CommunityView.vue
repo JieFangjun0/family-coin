@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue' // +++ 修改: 引入 computed +++
 import { useRoute } from 'vue-router'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
@@ -17,6 +17,39 @@ const errorMessage = ref(null)
 const successMessage = ref(null)
 const friendStatus = ref(null)
 
+// +++ 核心修改 (请求 3a): 新增状态用于标签页 +++
+const profileActiveTab = ref(null)
+const nftDisplayNames = ref({})
+
+// +++ 核心修改 (请求 3a): 新增计算属性用于分组 +++
+const profileNftsByType = computed(() => {
+  const groups = {}
+  const nfts = searchResult.value?.displayed_nfts_details || []
+  for (const nft of nfts) {
+    if (!groups[nft.nft_type]) {
+      groups[nft.nft_type] = []
+    }
+    groups[nft.nft_type].push(nft)
+  }
+  // 当搜索结果变化时，自动重置Tab
+  const keys = Object.keys(groups).sort()
+  profileActiveTab.value = keys.length > 0 ? keys[0] : null
+  return groups
+})
+
+const profileSortedNftTypes = computed(() => {
+    return Object.keys(profileNftsByType.value)
+})
+
+// +++ 核心修改 (请求 3a): 新增函数获取NFT名称 +++
+async function fetchNftDisplayNames() {
+  if (Object.keys(nftDisplayNames.value).length > 0) return; // 已经获取过了
+  const [data, error] = await apiCall('GET', '/nfts/display_names')
+  if (!error) {
+    nftDisplayNames.value = data
+  }
+}
+
 async function handleSearch(uidOrUsername) {
   const term = uidOrUsername || searchTerm.value;
   if (!term) return;
@@ -32,6 +65,7 @@ async function handleSearch(uidOrUsername) {
     errorMessage.value = `查找失败: ${error}`;
   } else {
     searchResult.value = data;
+    await fetchNftDisplayNames(); // +++ 核心修改 (请求 3a): 获取名称
     if (data.public_key !== authStore.userInfo.publicKey) {
       await checkFriendshipStatus(data.public_key);
     }
@@ -83,6 +117,7 @@ watch(() => route.params.uid, (newUid) => {
 });
 
 onMounted(() => {
+  fetchNftDisplayNames(); // +++ 核心修改 (请求 3a): 预加载NFT名称
   if (route.params.uid) {
     searchTerm.value = route.params.uid;
     handleSearch(route.params.uid);
@@ -132,16 +167,32 @@ onMounted(() => {
 
       <div class="nft-showcase">
         <h3>NFT 展柜</h3>
-        <div v-if="searchResult.displayed_nfts_details && searchResult.displayed_nfts_details.length > 0" class="nft-grid">
-          <NftCard 
-            v-for="nft in searchResult.displayed_nfts_details" 
-            :key="nft.nft_id" 
-            :nft="nft"
-            context="profile"
-          />
+        
+        <div v-if="searchResult.displayed_nfts_details && searchResult.displayed_nfts_details.length > 0">
+          <div class="tabs" v-if="profileSortedNftTypes.length > 1">
+            <button
+              v-for="nftType in profileSortedNftTypes"
+              :key="nftType"
+              :class="{ active: profileActiveTab === nftType }"
+              @click="profileActiveTab = nftType"
+            >
+              {{ nftDisplayNames[nftType] || nftType }} ({{ profileNftsByType[nftType].length }})
+            </button>
+          </div>
+      
+          <div v-for="nftType in profileSortedNftTypes" :key="nftType" v-show="profileActiveTab === nftType" class="tab-content">
+            <div class="nft-grid">
+              <NftCard 
+                v-for="nft in profileNftsByType[nftType]" 
+                :key="nft.nft_id" 
+                :nft="nft"
+                context="profile"
+              />
+            </div>
+          </div>
         </div>
         <p v-else class="empty-state">{{ searchResult.username }} 还没有展出任何NFT。</p>
-      </div>
+        </div>
     </div>
   </div>
 </template>
@@ -166,4 +217,35 @@ onMounted(() => {
 .status-tag.pending { background-color: #faf089; color: #975a16; }
 .status-tag.incoming { background-color: #bee3f8; color: #2c5282; }
 .message { margin-bottom: 1rem; }
+
+/* +++ 核心修改 (请求 3a): 新增标签页样式 +++ */
+.tabs { 
+    display: flex; 
+    gap: 0.5rem; 
+    margin-bottom: 1.5rem; 
+    border-bottom: 2px solid #e2e8f0;
+    flex-wrap: wrap;
+}
+.tabs button { 
+    padding: 0.75rem 1rem; 
+    border: none; 
+    background: none; 
+    font-size: 0.9rem; /* 调小一点以适应卡片 */
+    font-weight: 600; 
+    color: #718096; 
+    cursor: pointer; 
+    border-bottom: 4px solid transparent; 
+    transform: translateY(2px); 
+    transition: color 0.2s, border-color 0.2s;
+}
+.tabs button:hover { color: #4a5568; }
+.tabs button.active { color: #42b883; border-bottom-color: #42b883; }
+.tab-content {
+  padding-top: 1rem;
+  animation: fadeIn 0.3s;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 </style>

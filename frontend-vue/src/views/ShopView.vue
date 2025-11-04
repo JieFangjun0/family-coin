@@ -24,7 +24,10 @@ const allNftTypes = ref({})
 const myNfts = ref([])      
 const myActivity = ref({ listings: [], offers: [] })
 const myOffersDetails = ref({}) 
-const auctionBidHistory = reactive({}) // 新增：拍卖历史
+const auctionBidHistory = reactive({})
+
+// +++ 核心修改 (请求 2): 新增状态，用于切换显示已完成的交易 +++
+const showInactiveListings = ref(false)
 
 // --- 表单 ---
 const mintForms = ref({})
@@ -51,7 +54,17 @@ const isLoading = ref({
 // --- Computed ---
 const sortedMyListings = computed(() => {
   if (!myActivity.value.listings) return []
-  return [...myActivity.value.listings].sort((a, b) => {
+  
+  // +++ 核心修改 (请求 2): 过滤非活跃的挂单 +++
+  const filtered = myActivity.value.listings.filter(item => {
+    if (showInactiveListings.value) {
+      return true; // 显示所有
+    }
+    return item.status === 'ACTIVE'; // 默认只显示活跃
+  });
+  
+  // 排序过滤后的列表
+  return [...filtered].sort((a, b) => {
     if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1
     if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1
     return b.created_at - a.created_at
@@ -76,9 +89,7 @@ async function fetchDataForTab(tab) {
   // successMessage.value = null; // 切换tab时不清除成功消息
   switch (tab) {
     case 'mint':
-      // +++ 修复2：同时获取可铸造列表和NFT类型名称 +++
       if (Object.keys(creatableNfts.value).length === 0) {
-        // 也获取NFT名称
         if (Object.keys(allNftTypes.value).length === 0) {
           await Promise.all([fetchCreatableNfts(), fetchAllNftTypes()]);
         } else {
@@ -87,10 +98,18 @@ async function fetchDataForTab(tab) {
       }
       break;
     case 'buy':
-      await fetchSaleListings();
+      // +++ 核心修改 (请求 1): 确保加载NFT名称 +++
+      await Promise.all([
+        fetchSaleListings(),
+        fetchAllNftTypes()
+      ]);
       break;
     case 'auction': 
-      await fetchAuctionListings();
+      // +++ 核心修改 (请求 1): 确保加载NFT名称 +++
+      await Promise.all([
+        fetchAuctionListings(),
+        fetchAllNftTypes()
+      ]);
       break;
     case 'seek': 
       await Promise.all([
@@ -136,7 +155,6 @@ async function fetchCreatableNfts() {
 
 async function fetchSaleListings() {
   isLoading.value.buy = true
-  // *** 修复点 3: 移除 exclude_owner ***
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'SALE' }
   })
@@ -147,7 +165,6 @@ async function fetchSaleListings() {
 
 async function fetchAuctionListings() {
   isLoading.value.auction = true
-  // *** 修复点 3: 移除 exclude_owner ***
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'AUCTION' }
   })
@@ -166,7 +183,6 @@ async function fetchAuctionListings() {
 
 async function fetchSeekListings() {
   isLoading.value.seek = true
-  // *** 修复点 3: 移除 exclude_owner ***
   const [data, error] = await apiCall('GET', '/market/listings', {
     params: { listing_type: 'SEEK' }
   })
@@ -298,13 +314,12 @@ async function handleCancelListing(listingId) {
   }
 }
 
-// *** 修复点 4: 拍卖出价 ***
 async function handlePlaceBid(item) {
+  // (此函数无修改)
   successMessage.value = null
   errorMessage.value = null
 
   const bidAmount = parseFloat(bidForms[item.listing_id])
-  // 确保比较时使用正确的最小值
   const minBid = parseFloat(((item.highest_bid || item.price) + 0.01).toFixed(2))
 
   if (!bidAmount || bidAmount < minBid) {
@@ -336,22 +351,19 @@ async function handlePlaceBid(item) {
     successMessage.value = data.detail
     await fetchBalance()
     await fetchAuctionListings()
-    // 新增：清除缓存的出价历史，以便下次点击时刷新
     if (auctionBidHistory[item.listing_id]) {
       delete auctionBidHistory[item.listing_id]
     }
   }
 }
 
-// *** 修复点 4: 获取出价历史 ***
 async function fetchBidHistory(listingId) {
+  // (此函数无修改)
   if (auctionBidHistory[listingId] && auctionBidHistory[listingId].show) {
-    // 如果已经加载且显示，则隐藏
     auctionBidHistory[listingId].show = false;
     return;
   }
   
-  // 如果未加载，或已加载但隐藏
   auctionBidHistory[listingId] = { isLoading: true, bids: [], show: true };
   const [data, error] = await apiCall('GET', `/market/listings/${listingId}/bids`);
   if (error) {
@@ -564,7 +576,7 @@ onMounted(() => {
       <div v-else class="nft-grid">
         <div v-for="item in saleListings" :key="item.listing_id" class="nft-card buy-card">
           <div class="nft-header">
-            <span class="nft-type">{{ item.nft_type }}</span>
+            <span class="nft-type">{{ allNftTypes[item.nft_type] || item.nft_type }}</span>
             <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
           </div>
           <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
@@ -598,7 +610,7 @@ onMounted(() => {
       <div v-else class="nft-grid">
         <div v-for="item in auctionListings" :key="item.listing_id" class="nft-card auction-card">
           <div class="nft-header">
-            <span class="nft-type-auction">拍卖中</span>
+            <span class="nft-type-auction">拍卖: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
             <span class="nft-price">{{ item.highest_bid > 0 ? '当前' : '起拍' }}: {{ formatCurrency(item.highest_bid || item.price) }} FC</span>
           </div>
           <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
@@ -736,63 +748,72 @@ onMounted(() => {
         <div v-else-if="!myActivity.listings || myActivity.listings.length === 0" class="empty-state">
             你还没有发布过任何挂单。
         </div>
-        <div v-else class="nft-grid full-width-grid">
-            <div v-for="item in sortedMyListings" :key="item.listing_id" class="nft-card my-listing-card" :class="`status-${item.status.toLowerCase()}`">
-                <div class="nft-header">
-                    <span :class="['nft-type-listing', `type-${item.listing_type.toLowerCase()}`]">{{ translateListingType(item.listing_type) }}</span>
-                    <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
-                </div>
-                <h3 class="nft-name">{{ item.description }}</h3>
-                <ul class="nft-data">
-                    <li><strong>类型:</strong> {{ allNftTypes[item.nft_type] || item.nft_type }}</li>
-                    <li><strong>状态:</strong> <span class="status-text">{{ translateStatus(item.status) }}</span></li>
-                    <li><strong>上架于:</strong> {{ formatTimestamp(item.created_at) }}</li>
-                    <li v-if="item.listing_type === 'AUCTION' && item.highest_bidder">
-                        <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} FC
-                        <button class="link-button" @click.prevent="fetchBidHistory(item.listing_id)">
-                            ({{ auctionBidHistory[item.listing_id]?.show ? '隐藏' : '查看' }}历史)
+        <div v-else>
+            <div class="filter-toggle">
+              <label>
+                <input type="checkbox" v-model="showInactiveListings" />
+                显示已完成/已取消的交易
+              </label>
+            </div>
+            
+            <div class="nft-grid full-width-grid">
+                <div v-for="item in sortedMyListings" :key="item.listing_id" class="nft-card my-listing-card" :class="`status-${item.status.toLowerCase()}`">
+                    <div class="nft-header">
+                        <span :class="['nft-type-listing', `type-${item.listing_type.toLowerCase()}`]">{{ translateListingType(item.listing_type) }}</span>
+                        <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
+                    </div>
+                    <h3 class="nft-name">{{ item.description }}</h3>
+                    <ul class="nft-data">
+                        <li><strong>类型:</strong> {{ allNftTypes[item.nft_type] || item.nft_type }}</li>
+                        <li><strong>状态:</strong> <span class="status-text">{{ translateStatus(item.status) }}</span></li>
+                        <li><strong>上架于:</strong> {{ formatTimestamp(item.created_at) }}</li>
+                        <li v-if="item.listing_type === 'AUCTION' && item.highest_bidder">
+                            <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} FC
+                            <button class="link-button" @click.prevent="fetchBidHistory(item.listing_id)">
+                                ({{ auctionBidHistory[item.listing_id]?.show ? '隐藏' : '查看' }}历史)
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div v-if="item.listing_type === 'AUCTION' && auctionBidHistory[item.listing_id]?.show" class="bid-history">
+                      <div v-if="auctionBidHistory[item.listing_id].isLoading" class="loading-state-small">加载历史...</div>
+                      <ul v-else-if="auctionBidHistory[item.listing_id].bids.length > 0" class="offers-list">
+                        <li v-for="(bid, index) in auctionBidHistory[item.listing_id].bids" :key="index">
+                          <div class="offer-info">
+                            <ClickableUsername :uid="bid.bidder_uid" :username="bid.bidder_username" />
+                            <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} FC</strong></span>
+                            <span class="bid-time">@ {{ formatTimestamp(bid.created_at) }}</span>
+                          </div>
+                        </li>
+                      </ul>
+                      <div v-else class="empty-state-small">暂无出价记录</div>
+                    </div>
+
+                    <div v-if="item.status === 'ACTIVE'" class="cancel-action">
+                        <button class="cancel-button" @click="handleCancelListing(item.listing_id)">取消挂单</button>
+                    </div>
+
+                    <div v-if="item.listing_type === 'SEEK' && item.status === 'ACTIVE'" class="offers-section">
+                        <button class="offers-toggle" @click="fetchOffersForMyListing(item.listing_id)">
+                            {{ myOffersDetails[item.listing_id] ? '刷新报价' : '查看收到的报价' }}
                         </button>
-                    </li>
-                </ul>
-
-                <div v-if="item.listing_type === 'AUCTION' && auctionBidHistory[item.listing_id]?.show" class="bid-history">
-                  <div v-if="auctionBidHistory[item.listing_id].isLoading" class="loading-state-small">加载历史...</div>
-                  <ul v-else-if="auctionBidHistory[item.listing_id].bids.length > 0" class="offers-list">
-                    <li v-for="(bid, index) in auctionBidHistory[item.listing_id].bids" :key="index">
-                      <div class="offer-info">
-                        <ClickableUsername :uid="bid.bidder_uid" :username="bid.bidder_username" />
-                        <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} FC</strong></span>
-                        <span class="bid-time">@ {{ formatTimestamp(bid.created_at) }}</span>
-                      </div>
-                    </li>
-                  </ul>
-                  <div v-else class="empty-state-small">暂无出价记录</div>
-                </div>
-
-                <div v-if="item.status === 'ACTIVE'" class="cancel-action">
-                    <button class="cancel-button" @click="handleCancelListing(item.listing_id)">取消挂单</button>
-                </div>
-
-                <div v-if="item.listing_type === 'SEEK' && item.status === 'ACTIVE'" class="offers-section">
-                    <button class="offers-toggle" @click="fetchOffersForMyListing(item.listing_id)">
-                        {{ myOffersDetails[item.listing_id] ? '刷新报价' : '查看收到的报价' }}
-                    </button>
-                    <div v-if="myOffersDetails[item.listing_id]">
-                        <div v-if="myOffersDetails[item.listing_id].isLoading" class="loading-state-small">加载中...</div>
-                        <div v-else-if="myOffersDetails[item.listing_id].offers.length === 0" class="empty-state-small">暂未收到报价</div>
-                        <ul v-else class="offers-list">
-                            <li v-for="offer in myOffersDetails[item.listing_id].offers" :key="offer.offer_id">
-                                <div class="offer-info">
-                                    <ClickableUsername :uid="offer.offerer_uid" :username="offer.offerer_username" />
-                                    <span>: {{ offer.trade_description || offer.nft_data.name }}</span>
-                                    <span :class="['status-tag', `status-${offer.status.toLowerCase()}`]">{{ translateStatus(offer.status) }}</span>
-                                </div>
-                                <div v-if="offer.status === 'PENDING'" class="offer-actions">
-                                    <button class="accept-button" @click="handleRespondToOffer(offer.offer_id, true)">接受</button>
-                                    <button class="reject-button" @click="handleRespondToOffer(offer.offer_id, false)">拒绝</button>
-                                </div>
-                            </li>
-                        </ul>
+                        <div v-if="myOffersDetails[item.listing_id]">
+                            <div v-if="myOffersDetails[item.listing_id].isLoading" class="loading-state-small">加载中...</div>
+                            <div v-else-if="myOffersDetails[item.listing_id].offers.length === 0" class="empty-state-small">暂未收到报价</div>
+                            <ul v-else class="offers-list">
+                                <li v-for="offer in myOffersDetails[item.listing_id].offers" :key="offer.offer_id">
+                                    <div class="offer-info">
+                                        <ClickableUsername :uid="offer.offerer_uid" :username="offer.offerer_username" />
+                                        <span>: {{ offer.trade_description || offer.nft_data.name }}</span>
+                                        <span :class="['status-tag', `status-${offer.status.toLowerCase()}`]">{{ translateStatus(offer.status) }}</span>
+                                    </div>
+                                    <div v-if="offer.status === 'PENDING'" class="offer-actions">
+                                        <button class="accept-button" @click="handleRespondToOffer(offer.offer_id, true)">接受</button>
+                                        <button class="reject-button" @click="handleRespondToOffer(offer.offer_id, false)">拒绝</button>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -808,22 +829,18 @@ onMounted(() => {
 .subtitle { color: #718096; margin-bottom: 1.5rem; }
 .balance-display { margin-bottom: 2rem; max-width: 350px; }
 
-/* +++ 核心修复：重构 Tab 布局以强制实现“单行均匀分布” +++ */
 .tabs { 
     display: flex; 
-    flex-direction: row; /* 1. 强制水平排列 */
-    flex-wrap: nowrap; /* 2. 强制不换行 */
+    flex-direction: row;
+    flex-wrap: nowrap;
     gap: 0.5rem; 
     margin-bottom: 1.5rem; 
     border-bottom: 2px solid #e2e8f0;
 }
 .tabs button { 
-    /* 3. 让所有按钮平分宽度，自动缩放 */
     flex-grow: 1;
     flex-basis: 0;
-    
-    /* 样式 */
-    padding: 0.75rem 1rem; /* 减小左右内边距，以便在小屏幕上容纳 */
+    padding: 0.75rem 1rem;
     border: none; 
     background: none; 
     font-size: 1rem; 
@@ -833,14 +850,11 @@ onMounted(() => {
     border-bottom: 4px solid transparent; 
     transform: translateY(2px); 
     transition: color 0.2s, border-color 0.2s;
-    
-    /* 4. 确保文本居中且不换行 */
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis; /* 如果空间实在不够，用省略号... */
+    text-overflow: ellipsis;
 }
-/* +++ 修复结束 +++ */
 
 .tabs button:hover { color: #4a5568; }
 .tabs button.active { color: #42b883; border-bottom-color: #42b883; }
@@ -918,7 +932,7 @@ button:disabled { background-color: #a0aec0; cursor: not-allowed; }
 .accept-button { background-color: #48bb78; }
 .reject-button { background-color: #a0aec0; }
 
-/* *** 拍卖历史样式 *** */
+/* 拍卖历史样式 */
 .link-button {
   background: none;
   border: none;
@@ -934,7 +948,7 @@ button:disabled { background-color: #a0aec0; cursor: not-allowed; }
 .bid-history {
   padding: 0 1.25rem 1.25rem;
   border-top: 1px solid #f0f2f5;
-  margin-top: -1.25rem; /* 抵消 .nft-data 的 padding-bottom */
+  margin-top: -1.25rem;
   padding-top: 1.25rem;
 }
 .bid-time {
@@ -945,7 +959,22 @@ button:disabled { background-color: #a0aec0; cursor: not-allowed; }
   padding-left: 0.5rem;
 }
 .offers-list li .offer-info {
-  flex-wrap: nowrap; /* 确保出价历史在同一行 */
+  flex-wrap: nowrap;
 }
 
+/* +++ 核心修改 (请求 2): 切换开关样式 +++ */
+.filter-toggle {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.filter-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+}
 </style>
