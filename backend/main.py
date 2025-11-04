@@ -270,17 +270,35 @@ class ShopActionRequest(BaseModel):
     nft_type: str
     cost: float
     data: dict
-class BotGlobalSettings(BaseModel):
-    bot_system_enabled: bool
-    bot_check_interval_seconds: int
 
-class BotTypeConfig(BaseModel):
-    count: int
+# --- (移除) 旧的机器人 Pydantic 模型 ---
+# class BotGlobalSettings(BaseModel): ...
+# class BotTypeConfig(BaseModel): ...
+# class FullBotConfigRequest(BaseModel): ...
+
+# +++ (新增) 新的机器人 Pydantic 模型 +++
+class AdminCreateBotRequest(BaseModel):
+    username: str
+    bot_type: str
+    initial_funds: float
     action_probability: float
 
-class FullBotConfigRequest(BaseModel):
-    global_settings: BotGlobalSettings
-    bot_types: Dict[str, BotTypeConfig]
+class AdminBotInfo(BaseModel):
+    public_key: str
+    uid: str
+    username: str
+    bot_type: str
+    is_active: bool
+    action_probability: float
+    balance: float
+
+class AdminBotListResponse(BaseModel):
+    bots: List[AdminBotInfo]
+
+class AdminSetBotConfigRequest(BaseModel):
+    public_key: str
+    action_probability: float
+
 # --- 管理员认证 ---
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
 GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
@@ -292,9 +310,9 @@ def verify_admin(x_admin_secret: str = Header(None)):
 
 # --- FastAPI 应用实例 ---
 app = FastAPI(
-    title="FamilyCoin API (V0.3.0 - Market System)",
+    title="FamilyCoin API (V0.3.1 - Bot System V2)",
     description="一个用于家庭和朋友的中心化玩具加密货币API (带邀请、市场和NFT框架)",
-    version="0.3.0"
+    version="0.3.1"
 )
 
 @app.on_event("startup")
@@ -302,7 +320,7 @@ def on_startup():
     print("正在启动 API ... 初始化数据库...")
     ledger.init_db()
     
-    print("--- API 启动：正在启动后台机器人调度器线程... ---")
+    print("--- API 启动：正在启动后台机器人调度器线程 (V2)... ---")
     bot_thread = threading.Thread(
         target=bot_runner.run_bot_loop, 
         daemon=True 
@@ -481,7 +499,7 @@ def api_get_user_details(public_key: str):
 def api_get_all_users(public_key: str):
     """
     获取用户列表。
-    - 如果请求者是管理员(创世用户)，返回所有活跃用户。
+    - 如果请求者是管理员(创世用户)，返回所有活跃的人类用户。
     - 如果是普通用户，返回其好友列表。
     """
     if not public_key:
@@ -493,7 +511,7 @@ def api_get_all_users(public_key: str):
         raise HTTPException(status_code=404, detail="请求用户不存在")
 
     if user_details.get('invited_by') == 'GENESIS':
-        # 管理员获取所有用户
+        # 管理员获取所有人类用户
         users = ledger.get_all_active_users()
     else:
         # 普通用户获取好友
@@ -786,7 +804,8 @@ def api_get_creatable_nfts():
             configs[nft_type] = config
     return configs
 
-@app.post("/market/create_nft", response_model=SuccessResponse, tags=["Market"])
+# +++ 修改：返回 nft_id +++
+@app.post("/market/create_nft", response_model=Dict, tags=["Market"])
 def api_create_nft_from_shop(request: MarketSignedRequest):
     message = get_verified_message(request, ShopCreateNftRequest)
     
@@ -798,17 +817,13 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
     if not config.get("creatable") or config.get("cost") != message.cost:
         raise HTTPException(status_code=400, detail="NFT创建配置不匹配或该NFT不可创建")
 
-    # <<< --- BUG修复 #3：预先检查余额 --- >>>
     if ledger.get_balance(message.owner_key) < message.cost:
         raise HTTPException(status_code=400, detail="你的余额不足以支付铸造成本")
-    # <<< --- 修复结束 --- >>>
 
     with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
-        # 扣款现在应该总是成功的
         success, detail = ledger._create_system_transaction(message.owner_key, ledger.BURN_ACCOUNT, message.cost, f"商店铸造NFT: {message.nft_type}", conn)
         if not success:
             conn.rollback()
-            # 这种情况理论上不应发生，但作为保险
             raise HTTPException(status_code=500, detail=f"支付失败: {detail}")
         
         user_details = ledger.get_user_details(message.owner_key, conn)
@@ -821,16 +836,17 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"铸造逻辑失败: {detail}")
 
-        success, detail, nft_id = ledger.mint_nft(message.owner_key, message.nft_type, db_data, conn)
+        success, detail_mint, nft_id = ledger.mint_nft(message.owner_key, message.nft_type, db_data, conn)
         if not success:
             conn.rollback()
-            raise HTTPException(status_code=500, detail=f"数据库写入失败: {detail}")
+            raise HTTPException(status_code=500, detail=f"数据库写入失败: {detail_mint}")
 
         conn.commit()
 
-    return SuccessResponse(detail=f"铸造成功！你获得了新的 {config.get('name', 'NFT')}!")
-    
-@app.post("/market/shop_action", response_model=SuccessResponse, tags=["Market"])
+    return {"detail": f"铸造成功！你获得了新的 {config.get('name', 'NFT')}!", "nft_id": nft_id}
+
+# +++ 修改：返回 nft_id +++
+@app.post("/market/shop_action", response_model=Dict, tags=["Market"])
 def api_perform_shop_action(request: MarketSignedRequest):
     message = get_verified_message(request, ShopActionRequest)
 
@@ -842,10 +858,8 @@ def api_perform_shop_action(request: MarketSignedRequest):
     if not config.get("creatable") or config.get("cost") != message.cost:
         raise HTTPException(status_code=400, detail="商店配置不匹配或该物品不可用")
 
-    # <<< --- BUG修复 #3：预先检查余额 --- >>>
     if ledger.get_balance(message.owner_key) < message.cost:
         raise HTTPException(status_code=400, detail="你的余额不足以支付此操作的费用")
-    # <<< --- 修复结束 --- >>>
 
     with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
         # 1. 扣款
@@ -864,91 +878,84 @@ def api_perform_shop_action(request: MarketSignedRequest):
         user_details = ledger.get_user_details(message.owner_key, conn)
         username = user_details.get('username') if user_details else "未知用户"
 
-        success, detail, new_nft_id = handler.execute_shop_action(message.owner_key, username, message.data, conn)
+        success, detail_action, new_nft_id = handler.execute_shop_action(message.owner_key, username, message.data, conn)
 
         if not success:
             conn.rollback()
-            raise HTTPException(status_code=400, detail=detail)
+            raise HTTPException(status_code=400, detail=detail_action)
 
         conn.commit()
-        return SuccessResponse(detail=detail)
+        return {"detail": detail_action, "nft_id": new_nft_id}
 
 # ==============================================================================
-# --- (新增) 机器人管理 API ---
+# --- (重构) 机器人管理 API (V2) ---
 # ==============================================================================
-@app.get("/admin/bots/config", tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
-async def api_admin_get_bot_config():
+@app.get("/admin/bots/types", response_model=Dict, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+async def api_admin_get_bot_types():
     """
-    (重构) 获取当前机器人系统的配置 (动态发现)。
+    (新增) 获取所有已注册的机器人逻辑类型。
     """
-    config = ledger.get_bot_config()
+    return {"types": list(BOT_LOGIC_MAP.keys())}
+
+@app.get("/admin/bots/list", response_model=AdminBotListResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+async def api_admin_get_bot_list():
+    """
+    (新增) 获取所有已创建的机器人实例列表。
+    """
+    bots = ledger.get_all_bots(include_inactive=True)
+    # 移除私钥，不发送给前端
+    for bot in bots:
+        if 'private_key_pem' in bot:
+            del bot['private_key_pem']
+    return AdminBotListResponse(bots=bots)
+
+@app.post("/admin/bots/create", response_model=AdminBotInfo, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+async def api_admin_create_bot(request: AdminCreateBotRequest):
+    """
+    (新增) 创建一个新的机器人实例。
+    """
+    if request.bot_type not in BOT_LOGIC_MAP:
+        raise HTTPException(status_code=400, detail="无效的机器人类型")
+    if not request.username or len(request.username) < 3:
+        raise HTTPException(status_code=400, detail="机器人用户名至少需要3个字符")
+    if request.initial_funds < 0:
+        raise HTTPException(status_code=400, detail="初始资金不能为负")
+    if not (0.0 <= request.action_probability <= 1.0):
+        raise HTTPException(status_code=400, detail="行动概率必须在 0.0 和 1.0 之间")
+
+    success, detail, new_bot_info = ledger.admin_create_bot(
+        username=request.username,
+        bot_type=request.bot_type,
+        initial_funds=request.initial_funds,
+        action_probability=request.action_probability
+    )
     
-    # 1. 分离全局配置
-    global_config = {
-        "bot_system_enabled": config.get("bot_system_enabled", False),
-        "bot_check_interval_seconds": config.get("bot_check_interval_seconds", 30)
-    }
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
     
-    # 2. 动态构建机器人类型配置
-    bot_type_configs = {}
-    
-    # 3. 迭代所有在后端注册的机器人
-    for bot_name, bot_class in BOT_LOGIC_MAP.items():
-        # 从数据库加载配置，或使用默认值
-        db_config = config.get(bot_name, {"count": 0, "action_probability": 0.1})
-        
-        # 自动提取描述
-        description = "该机器人没有提供描述。"
-        if bot_class.__doc__:
-            description = bot_class.__doc__.strip().split('\n')[0] # 取文档字符串的第一行
-            
-        bot_type_configs[bot_name] = {
-            "count": db_config.get("count", 0),
-            "action_probability": db_config.get("action_probability", 0.1),
-            "description": description # <--- 动态将描述发送给前端
-        }
-    # 4. 返回解耦的结构
-    return {
-        "global_settings": global_config,
-        "bot_types": bot_type_configs
-    }
-@app.post("/admin/bots/config", response_model=SuccessResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
-async def api_admin_set_bot_config(request: FullBotConfigRequest): # <--- 5. 使用新的 Pydantic 模型
+    return AdminBotInfo(**new_bot_info)
+
+@app.post("/admin/bots/set_config", response_model=SuccessResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+async def api_admin_set_bot_config(request: AdminSetBotConfigRequest):
     """
-    (重构) 更新机器人系统的配置。
+    (新增) 更新一个机器人的行动概率。
     """
-    try:
-        with ledger.LEDGER_LOCK, ledger.get_db_connection() as conn:
-            cursor = conn.cursor()
-            # 1. 保存全局设置
-            cursor.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                ("bot_system_enabled", str(request.global_settings.bot_system_enabled).lower())
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                ("bot_check_interval_seconds", str(request.global_settings.bot_check_interval_seconds))
-            )
-            # 2. 保存所有已知的机器人特定设置
-            for bot_name, config in request.bot_types.items():
-                if bot_name in BOT_LOGIC_MAP: # 确保只保存后端认识的机器人
-                    db_key = f"bot_config_{bot_name}"
-                    # 只保存 count 和 probability
-                    config_to_save = {
-                        "count": config.count,
-                        "action_probability": config.action_probability
-                    }
-                    db_value = json.dumps(config_to_save, ensure_ascii=False)
-                    cursor.execute(
-                        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                        (db_key, db_value)
-                    )
-            conn.commit()
-            
-        return SuccessResponse(detail="机器人配置已成功更新。")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存配置失败: {e}")
+    success, detail = ledger.admin_set_bot_config(
+        public_key=request.public_key,
+        action_probability=request.action_probability
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=detail)
+    return SuccessResponse(detail=detail)
+
+# --- (移除) 旧的机器人 API ---
+# @app.get("/admin/bots/config", ...)
+# @app.post("/admin/bots/config", ...)
+
+
+# ==============================================================================
 # --- 管理员接口 ---
+# ==============================================================================
 @app.get("/admin/nft/types", response_model=List[str], tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
 def api_admin_get_nft_types():
     return get_available_nft_types()
@@ -1001,6 +1008,7 @@ def api_admin_burn(request: AdminBurnRequest):
 
 @app.get("/admin/balances", response_model=AdminBalancesResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_get_all_balances():
+    """ (修改) 此接口现在只返回人类用户。机器人通过 /admin/bots/list 管理。 """
     balances = ledger.get_all_balances(include_inactive=True)
     return AdminBalancesResponse(balances=balances)
 
@@ -1028,7 +1036,7 @@ def api_admin_adjust_user_quota(request: AdminAdjustUserQuotaRequest):
 # +++ 核心修正 #1：添加缺失的接口 +++
 @app.post("/admin/set_user_active_status", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_set_user_active_status(request: AdminSetUserActiveStatusRequest):
-    """(管理员功能) 启用或禁用一个用户。"""
+    """(管理员功能) 启用或禁用一个用户（或机器人）。"""
     success, detail = ledger.admin_set_user_active_status(request.public_key, request.is_active)
     if not success:
         raise HTTPException(status_code=400, detail=detail)
@@ -1045,7 +1053,7 @@ def api_admin_reset_user_password(request: AdminResetPasswordRequest):
 
 @app.post("/admin/purge_user", response_model=SuccessResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
 def api_admin_purge_user(request: AdminPurgeUserRequest):
-    """(管理员功能) 彻底清除用户数据"""
+    """(管理员功能) 彻底清除用户或机器人数据"""
     success, detail = ledger.admin_purge_user(request.public_key)
     if not success:
         raise HTTPException(status_code=500, detail=detail)

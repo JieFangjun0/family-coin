@@ -6,84 +6,79 @@ import random
 from backend.bots import BOT_LOGIC_MAP
 from backend.bots.bot_client import BotClient
 from backend import ledger
-import string
-import secrets
+
 API_BASE_URL = "http://backend:8000"
 
-# --- 内部状态 ---
-# { "bot_shop_0": {"client": BotClient, "logic": ShopEnthusiastBot_instance} }
+# --- 内部状态 (重构) ---
+# { "public_key_abc": {"client": BotClient, "logic": ShopEnthusiastBot_instance, "info": {...db_row...}} }
 _active_bots = {} 
-# { "bot_shop_0": "generated_password" }
-_bot_passwords = {}
 
-
-def _generate_password(length=16):
-    """生成一个临时的、安全的密码。"""
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-    return ''.join(secrets.choice(alphabet) for i in range(length))
-
-async def provision_and_login_bots(config: dict):
+async def update_active_bots():
     """
-    (核心) 根据数据库配置，动态创建、登录和管理机器人实例。
+    (重构) 根据数据库，动态创建和管理机器人实例。
     """
-    global _active_bots, _bot_passwords
+    global _active_bots
     
-    desired_bots = {} # { "bot_username": "BotLogicClassName" }
-    
-    # 1. 根据配置构建期望的机器人列表
-    for bot_type_name, bot_config in config.items():
-        if bot_type_name in BOT_LOGIC_MAP:
-            count = bot_config.get("count", 0)
-            for i in range(count):
-                username = f"bot_{bot_type_name.replace('Bot', '').lower()}_{i}"
-                desired_bots[username] = bot_type_name
+    try:
+        # 1. 从数据库获取所有激活的机器人
+        # (这是一个IO调用，但在
+# 循环中是可接受的)
+        active_db_bots_list = ledger.get_all_bots(include_inactive=False)
+        active_db_bots = {bot['public_key']: bot for bot in active_db_bots_list}
+        
+    except Exception as e:
+        print(f"❌ Bot Runner: 无法从数据库获取机器人列表: {e}")
+        # 清空所有机器人以防万一
+        _active_bots.clear()
+        return
 
-    # 2. 移除不再需要的机器人
-    current_bot_names = set(_active_bots.keys())
-    desired_bot_names = set(desired_bots.keys())
-    
-    bots_to_remove = current_bot_names - desired_bot_names
-    for username in bots_to_remove:
-        print(f"🤖 机器人 '{username}' 已被管理员禁用，正在移除...")
-        del _active_bots[username]
-        if username in _bot_passwords:
-            del _bot_passwords[username]
+    current_bot_keys = set(_active_bots.keys())
+    desired_bot_keys = set(active_db_bots.keys())
+
+    # 2. 移除 (停用) 的机器人
+    bots_to_remove = current_bot_keys - desired_bot_keys
+    for key in bots_to_remove:
+        print(f"🤖 机器人 '{_active_bots[key]['info']['username']}' 已被禁用或删除，正在停止...")
+        del _active_bots[key]
 
     # 3. 供给并登录新机器人
-    bots_to_add = desired_bot_names - current_bot_names
-    for username in bots_to_add:
-        bot_type_name = desired_bots[username]
-        bot_logic_class = BOT_LOGIC_MAP[bot_type_name]
+    bots_to_add = desired_bot_keys - current_bot_keys
+    for key in bots_to_add:
+        bot_info = active_db_bots[key]
+        username = bot_info['username']
+        bot_type_name = bot_info['bot_type']
         
-        # 生成或获取密码
-        if username not in _bot_passwords:
-            _bot_passwords[username] = _generate_password()
-        
-        password = _bot_passwords[username]
-        
-        # 自动在数据库中创建账户 (如果不存在)
-        if not ledger.provision_bot_user(username, password, bot_type_name):
-            print(f"❌ 无法为 '{username}' 供给账户，跳过该机器人。")
+        if bot_type_name not in BOT_LOGIC_MAP:
+            print(f"⚠️ 警告: 机器人 '{username}' 的类型 '{bot_type_name}' 在 BOT_LOGIC_MAP 中未注册，跳过。")
             continue
             
-        # 创建客户端并登录
-        client = BotClient(API_BASE_URL, username, password)
-        if await client.login():
-            _active_bots[username] = {
+        bot_logic_class = BOT_LOGIC_MAP[bot_type_name]
+        
+        try:
+            # (核心重构) 直接使用私钥初始化客户端，不再需要登录
+            client = BotClient(
+                base_url=API_BASE_URL,
+                username=username,
+                public_key=bot_info['public_key'],
+                private_key_pem=bot_info['private_key_pem']
+            )
+            
+            _active_bots[key] = {
                 "client": client,
-                "logic": bot_logic_class(client) # 实例化机器人逻辑
+                "logic": bot_logic_class(client), # 实例化机器人逻辑
+                "info": bot_info # 存储数据库信息 (包含概率)
             }
-        else:
-            print(f"❌ 机器人 '{username}' 登录失败，将在下一周期重试。")
-            # 清除密码，以便下次尝试时重新供给 (以防密码被篡改)
-            if username in _bot_passwords:
-                del _bot_passwords[username]
+            print(f"✅ 机器人 '{username}' (类型: {bot_type_name}) 已激活。")
+            
+        except Exception as e:
+            print(f"❌ 激活机器人 '{username}' 失败: {e}")
+
 
 def run_bot_loop():
     """
     机器人运行器的主循环（在单独的线程中运行）。
     """
-    print("--- 机器人调度器启动 ---")
+    print("--- 机器人调度器 (V2) 启动 ---")
     
     # 0. 稍微等待 Uvicorn 服务器启动
     print(f"--- 机器人调度器：等待 {API_BASE_URL} 启动... ---")
@@ -93,44 +88,31 @@ def run_bot_loop():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    check_interval = 30 # 默认 30 秒
+    
     while True:
         try:
-            # 1. 每次循环都从数据库读取最新配置
-            config = ledger.get_bot_config()
-            
-            if not config.get("bot_system_enabled", False):
-                if _active_bots:
-                    print("--- 机器人系统已被管理员禁用，清空所有机器人... ---")
-                    _active_bots.clear()
-                    _bot_passwords.clear()
-                
-                print("--- 机器人系统已禁用，调度器休眠 60 秒... ---")
-                time.sleep(60)
-                continue
-
-            # 2. 动态调整机器人实例 (登录/注销)
-            loop.run_until_complete(provision_and_login_bots(config))
+            # 1. 动态调整机器人实例 (登录/注销)
+            loop.run_until_complete(update_active_bots())
             
             if not _active_bots:
-                print("--- 机器人系统已启用，但没有配置机器人实例。 ---")
-                time.sleep(30)
+                print("--- 机器人系统：没有已激活的机器人实例。 ---")
+                time.sleep(check_interval)
                 continue
 
-            # 3. 概率性触发机器人动作
-            check_interval = config.get("bot_check_interval_seconds", 30)
+            # 2. 概率性触发机器人动作
             print(f"\n--- 机器人回合开始 (T={time.strftime('%H:%M:%S')}) ---")
             
             tasks = []
-            for username, bot_instance in _active_bots.items():
+            for key, bot_instance in _active_bots.items():
                 logic_instance = bot_instance["logic"]
-                bot_type_name = logic_instance.__class__.__name__
+                bot_info = bot_instance["info"]
                 
-                bot_type_config = config.get(bot_type_name, {})
-                probability = bot_type_config.get("action_probability", 0.1)
+                probability = bot_info.get("action_probability", 0.1)
                 
                 # 核心：概率性触发
                 if random.random() < probability:
-                    print(f"🎲 机器人 '{username}' ({bot_type_name}) 触发行动 (概率: {probability*100}%)")
+                    print(f"🎲 机器人 '{bot_info['username']}' 触发行动 (概率: {probability*100}%)")
                     tasks.append(logic_instance.execute_turn())
             
             if tasks:

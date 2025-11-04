@@ -1,3 +1,5 @@
+# backend/ledger.py
+
 import sqlite3
 import time
 import uuid
@@ -61,10 +63,16 @@ def init_db():
             invited_by TEXT,
             invitation_quota INTEGER DEFAULT 0,
             private_key_pem TEXT,
-            profile_signature TEXT
+            profile_signature TEXT,
+            
+            -- +++ 新增机器人字段 +++
+            is_bot BOOLEAN DEFAULT 0,
+            bot_type TEXT,
+            action_probability REAL DEFAULT 0.1
         )
         ''')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_uid ON users (uid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_is_bot ON users (is_bot)") # 新增索引
         
         # --- 新增：用户个人主页表 ---
         cursor.execute('''
@@ -195,66 +203,29 @@ def init_db():
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('welcome_bonus_amount', '500'))
         # 添加邀请人成功邀请新用户的奖励设置
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('inviter_bonus_amount', '200'))
-        # <<< --- 新增：为机器人系统添加默认设置 --- >>>
-        bot_defaults = {
-            "bot_system_enabled": "false",
-            "bot_check_interval_seconds": "30",
-            "bot_config_PlanetExplorerBot": json.dumps({"count": 2, "action_probability": 0.25}),
-            "bot_config_BargainHunterBot": json.dumps({"count": 1, "action_probability": 0.5})
-        }
-        for key, value in bot_defaults.items():
-             cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
-        # <<< --- 新增结束 --- >>>
+
+        # <<< --- 移除旧的机器人设置 --- >>>
+        cursor.execute("DELETE FROM settings WHERE key LIKE 'bot_%'")
+        
         conn.commit()
-        print("数据库初始化完成 (V3.1 Friends)。")
+        print("数据库初始化完成 (V3.2 Bots Re-arch)。")
 
-def get_bot_config() -> dict:
-    """(新增) 从数据库加载并构造机器人配置对象。"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT key, value FROM settings WHERE key LIKE 'bot_%'")
-        settings_rows = cursor.fetchall()
-        
-        config = {}
-        for row in settings_rows:
-            key = row['key']
-            value = row['value']
-            
-            if key == "bot_system_enabled":
-                config[key] = (value.lower() == "true")
-            elif key == "bot_check_interval_seconds":
-                config[key] = int(value)
-            elif key.startswith("bot_config_"):
-                # 提取机器人类型名称
-                bot_type_name = key.replace("bot_config_", "")
-                try:
-                    # 解析 JSON 配置
-                    config[bot_type_name] = json.loads(value)
-                except json.JSONDecodeError:
-                    print(f"❌ 警告：无法解析机器人配置 {key}，使用默认值。")
-                    config[bot_type_name] = {"count": 0, "action_probability": 0.0}
-        
-        return config
+# --- 机器人管理核心 (重构) ---
 
-def provision_bot_user(username: str, password: str, bot_type: str) -> bool:
-    """
-    (新增) 自动供给一个机器人用户。
-    如果用户不存在，则创建它，并设置密码和初始资金。
-    如果已存在，则什么也不做。
-    返回 True 表示用户已准备就绪。
-    """
+def admin_create_bot(username: str, bot_type: str, initial_funds: float, action_probability: float) -> (bool, str, dict):
+    """(新增) 管理员创建并供给一个机器人用户。"""
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
+            
             cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
             if cursor.fetchone():
-                return True # 用户已存在
+                return False, "用户名已存在", None
 
-            # --- 用户不存在，创建新机器人用户 ---
-            print(f"🤖 正在为机器人 '{username}' 自动供给新账户...")
-            
             private_key, public_key = generate_key_pair()
-            password_hash = generate_password_hash(password)
+            # 机器人不需要人类可记忆的密码，创建一个安全的随机密码
+            bot_password = _generate_secure_password(20)
+            password_hash = generate_password_hash(bot_password)
             
             while True:
                 uid = f"BOT_{_generate_uid(4)}"
@@ -263,8 +234,12 @@ def provision_bot_user(username: str, password: str, bot_type: str) -> bool:
                     break
             
             cursor.execute(
-                "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (public_key, uid, username, password_hash, "BOT_SYSTEM", 0, private_key)
+                """
+                INSERT INTO users 
+                (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem, is_bot, bot_type, action_probability, is_active) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (public_key, uid, username, password_hash, "BOT_SYSTEM", 0, private_key, 1, bot_type, action_probability, 1)
             )
             # 初始化个人资料
             cursor.execute("INSERT INTO user_profiles (public_key) VALUES (?)", (public_key,))
@@ -272,23 +247,77 @@ def provision_bot_user(username: str, password: str, bot_type: str) -> bool:
             cursor.execute("INSERT INTO balances (public_key, balance) VALUES (?, 0)", (public_key,))
 
             # --- 发放初始资金 ---
-            initial_funds = 10000.0
-            success, detail = _execute_system_tx_logic(
-                GENESIS_ACCOUNT, public_key, initial_funds, f"机器人 ({bot_type}) 初始资金", conn
-            )
-            if not success:
-                conn.rollback()
-                print(f"❌ 机器人 '{username}' 供给失败：无法发放初始资金。")
-                return False
+            if initial_funds > 0:
+                success, detail = _execute_system_tx_logic(
+                    GENESIS_ACCOUNT, public_key, initial_funds, f"机器人 ({bot_type}) 初始资金", conn
+                )
+                if not success:
+                    conn.rollback()
+                    return False, f"机器人 '{username}' 供给失败：无法发放初始资金。", None
 
             conn.commit()
-            print(f"✅ 机器人 '{username}' (UID: {uid}) 供给成功，初始资金 {initial_funds} FC。")
-            return True
             
+            # 返回新创建的机器人信息 (用于UI刷新)
+            new_bot_info = {
+                "public_key": public_key,
+                "uid": uid,
+                "username": username,
+                "bot_type": bot_type,
+                "is_active": True,
+                "action_probability": action_probability,
+                "balance": initial_funds
+            }
+            return True, f"机器人 '{username}' 创建成功。", new_bot_info
+            
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return False, "用户名或UID已存在", None
         except Exception as e:
             conn.rollback()
-            print(f"❌ 机器人 '{username}' 供给时发生严重错误: {e}")
-            return False
+            return False, f"机器人供给时发生严重错误: {e}", None
+
+def get_all_bots(include_inactive=False) -> list:
+    """(新增) 获取所有被标记为机器人的用户。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT 
+                u.public_key, u.uid, u.username, u.bot_type, u.is_active, 
+                u.action_probability, u.private_key_pem,
+                b.balance
+            FROM users u
+            LEFT JOIN balances b ON u.public_key = b.public_key
+            WHERE u.is_bot = 1
+        """
+        if not include_inactive:
+            query += " AND u.is_active = 1"
+        
+        cursor.execute(query)
+        return [dict(row) for row in cursor.fetchall()]
+
+def admin_set_bot_config(public_key: str, action_probability: float) -> (bool, str):
+    """(新增) 更新一个机器人的配置。"""
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET action_probability = ? WHERE public_key = ? AND is_bot = 1",
+                (action_probability, public_key)
+            )
+            if cursor.rowcount == 0:
+                return False, "未找到该机器人"
+            conn.commit()
+            return True, "机器人配置已更新"
+        except Exception as e:
+            conn.rollback()
+            return False, f"更新机器人配置失败: {e}"
+
+
+# <<< --- 移除旧的 get_bot_config 和 provision_bot_user --- >>>
+# def get_bot_config() -> dict: ... (REMOVED)
+# def provision_bot_user(...) -> bool: ... (REMOVED)
+
+
 # <<< --- 核心重构：全新的、通用的NFT验证函数 --- >>>
 def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
     """
@@ -897,7 +926,7 @@ def register_user(username: str, password: str, invitation_code: str) -> (bool, 
             default_quota_str = get_setting('default_invitation_quota')
             default_quota = int(default_quota_str) if default_quota_str and default_quota_str.isdigit() else DEFAULT_INVITATION_QUOTA
             
-            # --- 使用单一、正确的 INSERT 语句 ---
+            # --- 使用单一、正确的 INSERT 语句 (is_bot 默认为 0) ---
             cursor.execute(
                 "INSERT INTO users (public_key, uid, username, password_hash, invited_by, invitation_quota, private_key_pem) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (public_key, uid, username, password_hash, inviter_key, default_quota, private_key)
@@ -973,7 +1002,7 @@ def authenticate_user(username_or_uid: str, password: str) -> (bool, str, dict):
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT public_key, username, uid, password_hash, private_key_pem, is_active FROM users WHERE username = ? OR uid = ?",
+            "SELECT public_key, username, uid, password_hash, private_key_pem, is_active FROM users WHERE (username = ? OR uid = ?) AND is_bot = 0", # 确保机器人不能从此登录
             (username_or_uid, username_or_uid)
         )
         user = cursor.fetchone()
@@ -1108,6 +1137,10 @@ def get_user_details(public_key: str, conn=None) -> dict:
         if user_dict['invited_by'] == 'GENESIS':
             user_dict['inviter_username'] = '--- 系统 ---'
             user_dict['inviter_uid'] = None
+        # --- 兼容机器人 ---
+        if user_dict['invited_by'] == 'BOT_SYSTEM':
+            user_dict['inviter_username'] = '--- 机器人 ---'
+            user_dict['inviter_uid'] = None
 
 
         cursor.execute(
@@ -1124,11 +1157,11 @@ def get_user_details(public_key: str, conn=None) -> dict:
             return run_logic(new_conn)
 
 def get_all_active_users() -> list:
-    """获取所有活跃用户列表。"""
+    """获取所有活跃的人类用户列表。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # --- 核心修正：在这里添加 uid 字段 ---
-        cursor.execute("SELECT username, public_key, uid FROM users WHERE is_active = 1 ORDER BY username")
+        # --- 核心修正：添加 uid 字段, 排除机器人 ---
+        cursor.execute("SELECT username, public_key, uid FROM users WHERE is_active = 1 AND is_bot = 0 ORDER BY username")
         return [dict(row) for row in cursor.fetchall()]
 
 def get_transaction_history(public_key: str) -> list:
@@ -1217,7 +1250,7 @@ def process_transaction(
             return False, f"交易失败: {e}"
 
 def get_all_balances(include_inactive=False) -> list:
-    """(管理员功能) 获取所有用户的余额和邀请信息。"""
+    """(管理员功能) 获取所有人类用户的余额和邀请信息。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = """
@@ -1227,9 +1260,10 @@ def get_all_balances(include_inactive=False) -> list:
             FROM users u
             JOIN balances b ON u.public_key = b.public_key
             LEFT JOIN users inviter ON u.invited_by = inviter.public_key
+            WHERE u.is_bot = 0
         """
         if not include_inactive:
-            query += " WHERE u.is_active = 1"
+            query += " AND u.is_active = 1"
         query += " ORDER BY u.created_at"
         
         cursor.execute(query)
@@ -1382,6 +1416,11 @@ def admin_purge_user(public_key: str) -> (bool, str):
             cursor.execute("UPDATE nfts SET status = 'BURNED' WHERE owner_key = ?", (public_key,))
 
             cursor.execute("DELETE FROM invitation_codes WHERE generated_by = ? OR used_by = ?", (public_key, public_key))
+            
+            # --- (核心) 新增：删除好友关系 ---
+            cursor.execute("DELETE FROM friendships WHERE user1_key = ? OR user2_key = ?", (public_key, public_key))
+            cursor.execute("DELETE FROM user_profiles WHERE public_key = ?", (public_key,))
+            
             cursor.execute("DELETE FROM balances WHERE public_key = ?", (public_key,))
             cursor.execute("DELETE FROM users WHERE public_key = ?", (public_key,))
 

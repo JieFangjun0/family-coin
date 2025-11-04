@@ -8,44 +8,35 @@ from shared.crypto_utils import generate_key_pair, sign_message
 from cryptography.hazmat.primitives import serialization
 
 """
-机器人 API 客户端 (BotClient)
+机器人 API 客户端 (BotClient) V2
 
 - 这是一个异步客户端 (使用 httpx)，允许机器人并发执行操作。
-- 它模拟了前端 `apiCall` 和 `createSignedPayload` 的所有功能。
+- (重构) 它不再需要登录。它在初始化时直接接收私钥。
 """
 
 class BotClient:
-    def __init__(self, base_url: str, username: str, password: str):
+    def __init__(self, base_url: str, username: str, public_key: str, private_key_pem: str):
         self.base_url = base_url
         self.username = username
-        self.password = password
+        self.auth_info = {
+            "public_key": public_key,
+            "username": username
+        }
         
-        self.auth_info = {}
-        self.client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
-        print(f"🤖 BotClient for '{username}' initialized.")
-
-    async def login(self) -> bool:
-        """登录并获取公钥/私钥。"""
         try:
-            response = await self.client.post("/login", json={
-                "username_or_uid": self.username,
-                "password": self.password
-            })
-            if response.status_code == 200:
-                self.auth_info = response.json()
-                # 加载并存储私钥对象以便后续签名
-                self.private_key_obj = serialization.load_pem_private_key(
-                    self.auth_info['private_key'].encode('utf-8'),
-                    password=None
-                )
-                print(f"🤖 Bot '{self.username}' (UID: {self.auth_info['uid']}) 登录成功。")
-                return True
-            else:
-                print(f"❌ Bot '{self.username}' 登录失败: {response.json().get('detail')}")
-                return False
+            # 加载并存储私钥对象以便后续签名
+            self.private_key_obj = serialization.load_pem_private_key(
+                private_key_pem.encode('utf-8'),
+                password=None
+            )
         except Exception as e:
-            print(f"❌ Bot '{self.username}' 登录时发生网络错误: {e}")
-            return False
+            print(f"❌ Bot '{self.username}' 严重错误: 无法加载私钥: {e}")
+            raise e # 启动失败
+            
+        self.client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        print(f"🤖 BotClient for '{username}' (PK: {public_key[:10]}...) 已初始化。")
+
+    # (login 方法已被移除)
 
     @property
     def public_key(self) -> Optional[str]:
@@ -64,8 +55,6 @@ class BotClient:
             ).encode('utf-8')
 
             # 2. 签名
-            # 注意：我们在这里直接使用 cryptography 库，而不是前端的 tweetnacl，
-            # 因为我们持有的是 PEM 格式的私钥。
             signature_bytes = self.private_key_obj.sign(message_bytes)
             
             # 3. Base64 编码
@@ -73,7 +62,6 @@ class BotClient:
             signature_b64 = base64.b64encode(signature_bytes).decode('utf-8')
             
             # 4. 返回 API 载荷
-            # 注意：这里的 message_json 也必须是 compact 格式
             return {
                 "message_json": json.dumps(message, sort_keys=True, ensure_ascii=False, separators=(',', ':')),
                 "signature": signature_b64,
@@ -87,10 +75,19 @@ class BotClient:
         try:
             response = await self.client.request(method, endpoint, params=params, json=payload)
             if 200 <= response.status_code < 300:
-                return response.json(), None
+                try:
+                    return response.json(), None
+                except json.JSONDecodeError:
+                    return {"detail": response.text}, None # 容错
             else:
-                error_detail = response.json().get('detail', response.text)
+                error_detail = "未知错误"
+                try:
+                    error_detail = response.json().get('detail', response.text)
+                except json.JSONDecodeError:
+                    error_detail = response.text
                 return None, error_detail
+        except httpx.ConnectError as e:
+            return None, f"网络连接错误: {e}"
         except Exception as e:
             return None, str(e)
 
@@ -162,7 +159,8 @@ class BotClient:
         data, error = await self.api_call('POST', '/market/create_listing', payload=signed_payload)
         return (True, data.get('detail')) if not error else (False, error)
 
-    async def shop_action(self, nft_type: str, cost: float, data: dict, action_type: str) -> (bool, str):
+    async def shop_action(self, nft_type: str, cost: float, data: dict, action_type: str) -> (bool, str, Optional[str]):
+        """ (重构) 现在返回 (success, detail, nft_id) """
         message = {
             "owner_key": self.public_key,
             "timestamp": time.time(),
@@ -174,4 +172,8 @@ class BotClient:
         endpoint = "/market/create_nft" if action_type == "create" else "/market/shop_action"
         
         data, error = await self.api_call('POST', endpoint, payload=signed_payload)
-        return (True, data.get('detail')) if not error else (False, error)
+        if error:
+            return False, error, None
+        
+        # (核心修改) 从响应中解析 nft_id
+        return True, data.get('detail'), data.get('nft_id')
