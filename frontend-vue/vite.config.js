@@ -13,9 +13,17 @@ export default defineConfig({
     }
   },
   server: {
-    // 【核心修改】允许从任何主机访问 (对于 Docker 至关重要)
     host: true, 
-    port: 5173, // Vite 默认端口
+    port: 5173,
+    
+    // +++ 关键修改：添加这里 +++
+    // 允许来自 Nginx 反向代理的域名访问
+    allowedHosts: [
+      'jiefangjun.xyz',
+      'www.jiefangjun.xyz',
+    ],
+    // +++ 修改结束 +++
+
     proxy: {
       // 代理配置保持不变，这部分是正确的
       '/api': {
