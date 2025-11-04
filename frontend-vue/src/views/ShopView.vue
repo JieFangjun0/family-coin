@@ -76,7 +76,15 @@ async function fetchDataForTab(tab) {
   // successMessage.value = null; // 切换tab时不清除成功消息
   switch (tab) {
     case 'mint':
-      if (Object.keys(creatableNfts.value).length === 0) await fetchCreatableNfts();
+      // +++ 修复2：同时获取可铸造列表和NFT类型名称 +++
+      if (Object.keys(creatableNfts.value).length === 0) {
+        // 也获取NFT名称
+        if (Object.keys(allNftTypes.value).length === 0) {
+          await Promise.all([fetchCreatableNfts(), fetchAllNftTypes()]);
+        } else {
+          await fetchCreatableNfts();
+        }
+      }
       break;
     case 'buy':
       await fetchSaleListings();
@@ -491,8 +499,63 @@ onMounted(() => {
     <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
 
     <div v-if="activeTab === 'mint'" class="tab-content">
+      <div v-if="isLoading.mint" class="loading-state">正在加载铸造工坊...</div>
+      <div v-else-if="!creatableNfts || Object.keys(creatableNfts).length === 0" class="empty-state">
+        当前没有可通过商店铸造的NFT类型。
       </div>
+      <div v-else class="nft-grid full-width-grid">
+        <div v-for="(config, nftType) in creatableNfts" :key="nftType" class="nft-card">
+          <div class="nft-header">
+            <span class="nft-type">{{ allNftTypes[nftType] || nftType }}</span>
+            <span class="nft-price">{{ formatCurrency(config.cost) }} FC</span>
+          </div>
+          <h3 class="nft-name">{{ config.name }}</h3>
+          <p class="nft-description">{{ config.description }}</p>
 
+          <form @submit.prevent="handleMintNft(nftType, config)" class="mint-form">
+            <template v-if="config.fields && config.fields.length > 0">
+              <div v-for="field in config.fields" :key="field.name" class="form-group">
+                <label :for="`${nftType}-${field.name}`">{{ field.label }}</label>
+                
+                <input 
+                  v-if="field.type === 'text_input'" 
+                  type="text" 
+                  :id="`${nftType}-${field.name}`"
+                  v-model="mintForms[nftType][field.name]"
+                  :required="field.required"
+                  :placeholder="field.help"
+                />
+                
+                <textarea 
+                  v-if="field.type === 'text_area'" 
+                  :id="`${nftType}-${field.name}`"
+                  v-model="mintForms[nftType][field.name]"
+                  :required="field.required"
+                  :placeholder="field.help"
+                  rows="3"
+                ></textarea>
+                
+                <input 
+                  v-if="field.type === 'number_input'" 
+                  type="number" 
+                  :id="`${nftType}-${field.name}`"
+                  v-model.number="mintForms[nftType][field.name]"
+                  :required="field.required"
+                  :min="field.min_value"
+                  :max="field.max_value"
+                  :step="field.step"
+                />
+                
+                <p v-if="field.help && field.type !== 'text_input' && field.type !== 'text_area'" class="help-text">{{ field.help }}</p>
+              </div>
+            </template>
+            <button type="submit" :disabled="balance < config.cost">
+              {{ balance < config.cost ? '余额不足' : (config.action_label || '支付并铸造') }}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
     <div v-if="activeTab === 'buy'" class="tab-content">
       <div v-if="isLoading.buy" class="loading-state">正在加载市场数据...</div>
       <div v-else-if="!saleListings || saleListings.length === 0" class="empty-state">
@@ -744,17 +807,23 @@ onMounted(() => {
 .view-header h1 { font-size: 2rem; font-weight: 700; color: #2d3748; }
 .subtitle { color: #718096; margin-bottom: 1.5rem; }
 .balance-display { margin-bottom: 2rem; max-width: 350px; }
+
+/* +++ 核心修复：重构 Tab 布局以强制实现“单行均匀分布” +++ */
 .tabs { 
     display: flex; 
+    flex-direction: row; /* 1. 强制水平排列 */
+    flex-wrap: nowrap; /* 2. 强制不换行 */
     gap: 0.5rem; 
     margin-bottom: 1.5rem; 
     border-bottom: 2px solid #e2e8f0;
-    /* --- 修复点 2: 水平滚动 --- */
-    overflow-x: auto;
-    white-space: nowrap;
 }
 .tabs button { 
-    padding: 0.75rem 1.5rem; 
+    /* 3. 让所有按钮平分宽度，自动缩放 */
+    flex-grow: 1;
+    flex-basis: 0;
+    
+    /* 样式 */
+    padding: 0.75rem 1rem; /* 减小左右内边距，以便在小屏幕上容纳 */
     border: none; 
     background: none; 
     font-size: 1rem; 
@@ -764,15 +833,23 @@ onMounted(() => {
     border-bottom: 4px solid transparent; 
     transform: translateY(2px); 
     transition: color 0.2s, border-color 0.2s;
-    flex-shrink: 0; /* --- 修复点 2: 防止压缩 --- */
+    
+    /* 4. 确保文本居中且不换行 */
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* 如果空间实在不够，用省略号... */
 }
+/* +++ 修复结束 +++ */
+
 .tabs button:hover { color: #4a5568; }
 .tabs button.active { color: #42b883; border-bottom-color: #42b883; }
+
 .loading-state, .empty-state { text-align: center; padding: 3rem; color: #718096; font-size: 1.1rem; }
 .loading-state-small, .empty-state-small { text-align: center; padding: 1rem; color: #718096; font-size: 0.9rem; }
 
 .nft-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem; }
-.full-width-grid { grid-template-columns: 1fr; } 
+.full-width-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); } 
 
 .nft-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); display: flex; flex-direction: column; transition: opacity 0.3s; }
 .nft-header { padding: 1.25rem; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
@@ -789,6 +866,8 @@ onMounted(() => {
 
 .nft-price { font-size: 1.1rem; font-weight: 700; color: #2d3748; }
 .nft-description { padding: 0 1.25rem; font-size: 0.9rem; color: #718096; margin: 1rem 0;}
+.mint-form { padding: 1.25rem; background: #f7fafc; border-top: 1px solid #e2e8f0; margin-top: auto; }
+
 .nft-name { margin: 0; padding: 1rem 1.25rem 0.5rem 1.25rem; font-size: 1.25rem; color: #2d3748; }
 .nft-data { list-style: none; padding: 0.5rem 1.25rem 1.25rem 1.25rem; margin: 0; flex-grow: 1; font-size: 0.9rem; color: #4a5568; }
 .nft-data li { margin-bottom: 0.5rem; }
@@ -839,7 +918,7 @@ button:disabled { background-color: #a0aec0; cursor: not-allowed; }
 .accept-button { background-color: #48bb78; }
 .reject-button { background-color: #a0aec0; }
 
-/* *** 修复点 4: 拍卖历史样式 *** */
+/* *** 拍卖历史样式 *** */
 .link-button {
   background: none;
   border: none;

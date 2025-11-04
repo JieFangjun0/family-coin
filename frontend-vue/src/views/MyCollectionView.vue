@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
@@ -11,22 +11,63 @@ const isLoading = ref(true)
 const errorMessage = ref(null)
 const successMessage = ref(null)
 
+// --- 修复问题 3: 新增状态 ---
+const activeTab = ref(null)
+const nftDisplayNames = ref({})
+// --- 修复结束 ---
+
 async function fetchNfts() {
   isLoading.value = true
   errorMessage.value = null
   // successMessage.value = null; // Don't clear success message on auto-refresh
 
-  const [data, error] = await apiCall('GET', '/nfts/my', {
-    params: { public_key: authStore.userInfo.publicKey }
-  })
+  // --- 修复问题 3: 并行获取NFTs和类型名称 ---
+  const [nftResult, typesResult] = await Promise.all([
+    apiCall('GET', '/nfts/my', {
+      params: { public_key: authStore.userInfo.publicKey }
+    }),
+    apiCall('GET', '/nfts/display_names')
+  ])
 
-  if (error) {
-    errorMessage.value = `无法加载收藏: ${error}`
+  const [nftData, nftError] = nftResult
+  if (nftError) {
+    errorMessage.value = `无法加载收藏: ${nftError}`
   } else {
-    nfts.value = data.nfts
+    nfts.value = nftData.nfts
   }
+
+  const [typesData, typesError] = typesResult
+  if (typesError) {
+    errorMessage.value = (errorMessage.value || '') + `\n无法加载NFT类型: ${typesError}`
+  } else {
+    nftDisplayNames.value = typesData
+  }
+  // --- 修复结束 ---
+
   isLoading.value = false
 }
+
+// --- 修复问题 3: 新增 Computed 属性用于分组 ---
+const nftsByType = computed(() => {
+  const groups = {}
+  for (const nft of nfts.value) {
+    if (!groups[nft.nft_type]) {
+      groups[nft.nft_type] = []
+    }
+    groups[nft.nft_type].push(nft)
+  }
+  // 自动设置激活的 tab
+  if (activeTab.value === null && Object.keys(groups).length > 0) {
+    activeTab.value = Object.keys(groups).sort()[0]
+  }
+  return groups
+})
+
+const sortedNftTypes = computed(() => {
+    return Object.keys(nftsByType.value).sort()
+})
+// --- 修复结束 ---
+
 
 // 通用NFT动作处理器
 async function handleNftAction(event) {
@@ -129,15 +170,30 @@ onMounted(fetchNfts)
       你的收藏是空的。快去商店铸造或购买一些吧！
     </div>
 
-    <div class="nft-grid">
-      <NftCard 
-        v-for="nft in nfts" 
-        :key="nft.nft_id" 
-        :nft="nft"
-        @action="handleNftAction"
-      />
+    <div v-if="!isLoading && nfts.length > 0">
+      <div class="tabs" v-if="sortedNftTypes.length > 1">
+        <button
+          v-for="nftType in sortedNftTypes"
+          :key="nftType"
+          :class="{ active: activeTab === nftType }"
+          @click="activeTab = nftType"
+        >
+          {{ nftDisplayNames[nftType] || nftType }} ({{ nftsByType[nftType].length }})
+        </button>
+      </div>
+
+      <div v-for="nftType in sortedNftTypes" :key="nftType" v-show="activeTab === nftType" class="tab-content">
+        <div class="nft-grid">
+          <NftCard 
+            v-for="nft in nftsByType[nftType]" 
+            :key="nft.nft_id" 
+            :nft="nft"
+            @action="handleNftAction"
+          />
+        </div>
+      </div>
     </div>
-  </div>
+    </div>
 </template>
 
 <style scoped>
@@ -145,6 +201,38 @@ onMounted(fetchNfts)
 .view-header h1 { font-size: 2rem; font-weight: 700; color: #2d3748; }
 .subtitle { color: #718096; margin-bottom: 2rem; }
 .loading-state, .empty-state { text-align: center; padding: 3rem; color: #718096; font-size: 1.1rem; }
+
+/* --- 修复问题 3: 新增 Tab 样式 --- */
+.tabs { 
+    display: flex; 
+    gap: 0.5rem; 
+    margin-bottom: 1.5rem; 
+    border-bottom: 2px solid #e2e8f0;
+    flex-wrap: wrap;
+}
+.tabs button { 
+    padding: 0.75rem 1rem; 
+    border: none; 
+    background: none; 
+    font-size: 1rem; 
+    font-weight: 600; 
+    color: #718096; 
+    cursor: pointer; 
+    border-bottom: 4px solid transparent; 
+    transform: translateY(2px); 
+    transition: color 0.2s, border-color 0.2s;
+}
+.tabs button:hover { color: #4a5568; }
+.tabs button.active { color: #42b883; border-bottom-color: #42b883; }
+.tab-content {
+  animation: fadeIn 0.3s;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* --- 修复结束 --- */
+
 
 .nft-grid {
   display: grid;

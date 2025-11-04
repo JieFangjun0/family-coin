@@ -81,6 +81,9 @@ class SecretWishHandler(NFTLogicHandler):
             "creatable": True,
             "cost": 5.0,
             "name": "秘密愿望",
+            # +++ 在这里添加下面这一行 +++
+            "action_type": "create", # 告诉前端调用 /market/create_nft
+            # +++ 修复结束 +++
             "description": "支付 5 FC 来封存一个秘密或愿望。它将完全属于你，直到在设定的时间后悄然消失。",
             "fields": [
                 {
