@@ -521,3 +521,27 @@ def admin_get_market_trade_history(limit: int = 100) -> List[dict]:
         """
         cursor.execute(query, (limit,))
         return [dict(row) for row in cursor.fetchall()]
+    
+def admin_get_market_trade_history(limit: int = 100) -> List[dict]:
+    """(管理员功能) 获取最近的市场成交记录。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT
+                h.trade_id, h.listing_id, h.nft_id, h.nft_type, h.trade_type,
+                h.seller_key, h.buyer_key, h.price,
+                CAST(strftime('%s', h.timestamp) AS REAL) as timestamp,
+                seller.username as seller_username,
+                seller.uid as seller_uid,      -- +++ 核心修改 1: 新增 seller_uid +++
+                buyer.username as buyer_username,
+                buyer.uid as buyer_uid,        -- +++ 核心修改 2: 新增 buyer_uid +++
+                l.description as listing_description
+            FROM market_trade_history h
+            LEFT JOIN users seller ON h.seller_key = seller.public_key
+            LEFT JOIN users buyer ON h.buyer_key = buyer.public_key
+            LEFT JOIN market_listings l ON h.listing_id = l.listing_id
+            ORDER BY h.timestamp DESC
+            LIMIT ?
+        """
+        cursor.execute(query, (limit,))
+        return [dict(row) for row in cursor.fetchall()]

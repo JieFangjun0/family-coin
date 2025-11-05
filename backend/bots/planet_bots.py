@@ -23,7 +23,21 @@ except ImportError:
 
 print("--- 🪐 [PlanetBots Module Loaded] ---")
 
+# +++ 核心修改：中文名列表和随机选择函数 +++
+COLLECTOR_CHINESE_NAMES = ["行星收藏家", "星尘猎人", "秘境勘探者", "古物收集者"]
+SPECULATOR_CHINESE_NAMES = ["星际投机商", "宇宙交易员", "资产倒爷", "黑市掮客"]
+GAMBLER_CHINESE_NAMES = ["深空赌徒", "幸运星", "高风险玩家", "混沌先知"]
 
+def get_random_chinese_name(bot_type: str) -> str:
+    """根据类型获取一个随机中文名"""
+    if bot_type == "PlanetCollectorBot":
+        return random.choice(COLLECTOR_CHINESE_NAMES)
+    elif bot_type == "PlanetSpeculatorBot":
+        return random.choice(SPECULATOR_CHINESE_NAMES)
+    elif bot_type == "PlanetGamblerBot":
+        return random.choice(GAMBLER_CHINESE_NAMES)
+    return "未知机器人"
+# +++ 核心修改结束 +++
 # ==============================================================================
 # --- 机器人 1: 星球收藏家 (PlanetCollectorBot) ---
 # ==============================================================================
@@ -43,11 +57,17 @@ COLLECTOR_CONFIG = {
 class PlanetCollectorBot(BaseBot):
     """
     “星球收藏家”机器人 (拟人化)
-    个性:
-    - 它有一个随机生成的“执念”(梦想的星球类型、恒星、特质)。
-    - 它会积极探索(铸造)、扫描(互动)、出售(拍卖/一口价)、
-      购买(一口价/竞拍)和求购。
+    ...
     """
+    # +++ 核心修改 1: 新增默认配置和中文显示名 +++
+    DEFAULT_FUNDS = 500.0
+    DEFAULT_PROBABILITY = 0.2
+    CHINESE_DISPLAY_NAME = "星球收藏家"
+
+    @classmethod
+    def get_chinese_display_name(cls) -> str:
+        return cls.CHINESE_DISPLAY_NAME
+    # +++ 核心修改 1 结束 +++
 
     def __init__(self, client: BotClient):
         super().__init__(client)
@@ -56,12 +76,10 @@ class PlanetCollectorBot(BaseBot):
         self.dream_stellar_class = random.choice(ALL_STAR_CLASSES)
         self.dream_trait = random.choice(ALL_TRAITS)
         
-        # (修改) 使用 self.log 记录初始化
+        #  使用 self.log 记录初始化
         self.log(f"已初始化。我的执念是：寻找一颗位于【{self.dream_stellar_class}】" \
                  f"星系的【{self.dream_planet_type}】，" \
                  f"它必须拥有【{self.dream_trait}】特质！", action_type="INIT")
-
-    # --- (移除) 旧的 log 方法 (已由 BaseBot 继承) ---
 
     async def execute_turn(self):
         try:
@@ -73,7 +91,7 @@ class PlanetCollectorBot(BaseBot):
             listed_nft_ids = {l['nft_id'] for l in my_listings if l['status'] == 'ACTIVE'}
             planet_nfts = [nft for nft in my_nfts if nft['nft_type'] == 'PLANET']
             
-            # +++ (修改) 使用新的 log_turn_snapshot +++
+            # +++  使用新的 log_turn_snapshot +++
             self.log_turn_snapshot(balance, planet_nfts, my_listings)
 
             # 2. (行为) 扫描我的行星上的异常信号 (玩自己的NFT)
@@ -96,7 +114,7 @@ class PlanetCollectorBot(BaseBot):
         except Exception as e:
             self.log(f"❌ 执行回合时发生严重错误: {e}", action_type="ERROR")
         
-        # +++ (新增) 错峰执行 +++
+        # +++  错峰执行 +++
         await asyncio.sleep(random.uniform(0.1, 1.0))
 
     def _is_my_dream_planet(self, nft_data: dict) -> bool:
@@ -275,9 +293,17 @@ SPECULATOR_RANGES = {
 class PlanetSpeculatorBot(BaseBot):
     """
     “星球投机商”机器人 (拟人化) V3
-    - 每个实例都有自己独特的、随机生成的交易策略。
+    ...
     """
+    # +++ 核心修改 2: 新增默认配置和中文显示名 +++
+    DEFAULT_FUNDS = 2000.0
+    DEFAULT_PROBABILITY = 0.5
+    CHINESE_DISPLAY_NAME = "星球投机商"
 
+    @classmethod
+    def get_chinese_display_name(cls) -> str:
+        return cls.CHINESE_DISPLAY_NAME
+    # +++ 核心修改 2 结束 +++
     def __init__(self, client: BotClient):
         super().__init__(client)
         
@@ -298,7 +324,7 @@ class PlanetSpeculatorBot(BaseBot):
             "MIN_SALE_PRICE": SPECULATOR_RANGES["MIN_SALE_PRICE"],
         }
         
-        # (修改) 使用 self.log 记录初始化
+        # 使用 self.log 记录初始化
         self.log(f"已初始化。我的个性: 利润率 {self.config['SALE_PROFIT_MARGIN']:.1%}, "
                  f"抄底阈值 {self.config['BUY_DISCOUNT_THRESHOLD']:.1%}, "
                  f"拍卖阈值 {self.config['AUCTION_RARITY_THRESHOLD']} Rarity", action_type="INIT")
@@ -315,7 +341,7 @@ class PlanetSpeculatorBot(BaseBot):
             my_planets = [nft for nft in my_nfts if nft['nft_type'] == 'PLANET']
             my_unlisted_planets = [nft for nft in my_planets if nft['nft_id'] not in listed_nft_ids]
             
-            # +++ (修改) 使用新的 log_turn_snapshot +++
+            # +++  使用新的 log_turn_snapshot +++
             self.log_turn_snapshot(balance, my_unlisted_planets, my_listings)
 
             market_analysis = await self._analyze_market()
@@ -328,7 +354,7 @@ class PlanetSpeculatorBot(BaseBot):
         except Exception as e:
             self.log(f"❌ 执行回合时发生严重错误: {e}", action_type="ERROR")
         
-        # +++ (新增) 错峰执行 +++
+        # +++  错峰执行 +++
         await asyncio.sleep(random.uniform(0.1, 1.0))
 
     async def _analyze_market(self) -> dict:
@@ -431,7 +457,7 @@ class PlanetSpeculatorBot(BaseBot):
                 self.log(f"抄底失败: {detail}", action_type="MARKET_BUY_FAIL")
                 return balance
         
-        # --- 2. (新增) 扫描“拍卖行” (竞拍) ---
+        # --- 2.  扫描“拍卖行” (竞拍) ---
         self.log("正在扫描拍卖行寻找投机机会...", action_type="MARKET_SCAN_AUCTION")
         auctions = await self.client.get_market_listings("AUCTION")
         
@@ -521,12 +547,16 @@ GAMBLER_CONFIG = {
 class PlanetGamblerBot(BaseBot):
     """
     “星球赌徒”机器人 (拟人化)
-    
-    个性:
-    - 纯粹的混乱。
-    - 它的行为完全随机，不基于市场分析。
-    - 它会随机探索、随机卖货（价格离谱）、随机买货（不管划不划算）。
+    ...
     """
+    # +++ 核心修改 3: 新增默认配置和中文显示名 +++
+    DEFAULT_FUNDS = 50.0
+    DEFAULT_PROBABILITY = 0.75
+    CHINESE_DISPLAY_NAME = "星球赌徒"
+
+    @classmethod
+    def get_chinese_display_name(cls) -> str:
+        return cls.CHINESE_DISPLAY_NAME
 
     def __init__(self, client: BotClient):
         super().__init__(client)
@@ -549,7 +579,7 @@ class PlanetGamblerBot(BaseBot):
                 if nft['nft_type'] == 'PLANET' and nft['nft_id'] not in listed_nft_ids
             ]
             
-            # +++ (修改) 使用新的 log_turn_snapshot +++
+            # +++  使用新的 log_turn_snapshot +++
             self.log_turn_snapshot(balance, my_unlisted_planets, my_listings)
 
             if random.random() < GAMBLER_CONFIG["ACTION_CHANCE"]:
@@ -582,7 +612,7 @@ class PlanetGamblerBot(BaseBot):
         except Exception as e:
             self.log(f"❌ 执行回合时发生严重错误: {e}", action_type="ERROR")
         
-        # +++ (新增) 错峰执行 +++
+        # +++  错峰执行 +++
         await asyncio.sleep(random.uniform(0.1, 1.0))
 
     async def _action_explore(self, balance: float):

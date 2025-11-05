@@ -5,7 +5,7 @@ import asyncio
 import random
 from backend.bots import BOT_LOGIC_MAP
 from backend.bots.bot_client import BotClient
-from backend.db import queries_bots,database
+from backend.db import queries_bots,database,queries_market
 
 API_BASE_URL = "http://backend:8000"
 
@@ -116,7 +116,7 @@ def run_bot_loop():
             # 1. (新增) 在机器人回合开始前，先结算一次拍卖
             print(f"--- 机器人回合：正在结算已结束的拍卖... ---")
             try:
-                resolved_count = ledger.resolve_finished_auctions()
+                resolved_count = queries_market.resolve_finished_auctions()
                 if resolved_count > 0:
                     print(f"--- 机器人回合：成功结算了 {resolved_count} 场拍卖。 ---")
             except Exception as e:

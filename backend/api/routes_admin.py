@@ -142,7 +142,8 @@ def api_admin_get_market_trade_history(limit: int = 100):
 # --- Admin Bots ---
 @router.get("/bots/types", response_model=Dict, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
 def api_admin_get_bot_types():
-    return {"types": list(BOT_LOGIC_MAP.keys())}
+    configs = queries_bots.get_bot_type_configs()
+    return {"types": configs}
 
 @router.get("/bots/list", response_model=AdminBotListResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
 def api_admin_get_bot_list():

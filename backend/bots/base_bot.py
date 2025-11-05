@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from backend.bots.bot_client import BotClient
-from backend.db import queries_bots  # +++ 导入 ledger +++
+# REMOVED: from backend.db import queries_bots  # +++ 导入 ledger +++
 import json # +++ 导入 json +++
 class BaseBot(ABC):
     """
@@ -27,6 +27,9 @@ class BaseBot(ABC):
         
         # 2. 尝试写入数据库
         try:
+            # +++ 核心修改: 延迟导入以解决循环依赖 +++
+            from backend.db import queries_bots
+            # +++ 核心修改结束 +++
             # (这是一个线程安全的函数)
             queries_bots.log_bot_action(
                 bot_key=self.client.public_key,
