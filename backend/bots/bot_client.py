@@ -184,10 +184,24 @@ class BotClient:
         
         # (核心修改) 从响应中解析 nft_id
         return True, data.get('detail'), data.get('nft_id')
+    async def update_profile(self, signature: str, displayed_nft_ids: List[str]) -> (bool, str):
+        """(新增) 更新机器人的个人签名和展柜"""
+        message = {
+            "owner_key": self.public_key,
+            "signature": signature,
+            "displayed_nfts": displayed_nft_ids,
+            "timestamp": time.time()
+        }
+        signed_payload = self._sign_payload(message)
+        if not signed_payload:
+            return False, "签名失败"
+        
+        data, error = await self.api_call('POST', '/profile/update', payload=signed_payload)
+        return (True, data.get('detail')) if not error else (False, error)
 
     # +++ (新增) 允许机器人执行 NFT 动作 +++
     async def nft_action(self, nft_id: str, action: str, action_data: dict) -> (bool, str):
-        """(新增) 对自己的 NFT 执行一个动作 (例如: 扫描)。"""
+        """(新增) 对自己的 NFT 执行一个动作 (例如: 扫描, 丰收)。"""
         message = {
             "owner_key": self.public_key,
             "nft_id": nft_id,

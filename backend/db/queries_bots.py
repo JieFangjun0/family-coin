@@ -14,10 +14,9 @@ from backend.db.database import (
 
 # +++ 核心修改: 移除了模块顶部的 BOT_LOGIC_MAP 和 get_random_chinese_name 导入 +++
 
+
 def log_bot_action(bot_key: str, bot_username: str, action_type: str, message: str, data_snapshot: dict = None):
-    """
-    (线程安全) 将机器人的操作记录到数据库。
-    """
+    # ... (此函数不变) ...
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
@@ -38,7 +37,7 @@ def log_bot_action(bot_key: str, bot_username: str, action_type: str, message: s
             conn.rollback()
 
 def admin_get_bot_logs(bot_key: Optional[str] = None, limit: int = 100) -> List[dict]:
-    """(管理员功能) 从数据库获取最新的机器人日志。"""
+    # ... (此函数不变) ...
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = """
@@ -66,6 +65,7 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
     
     # +++ 核心修改 1: 延迟导入以解决循环依赖 +++
     from backend.bots import BOT_LOGIC_MAP
+    # (根据你的新机器人逻辑，决定从哪里导入)
     from backend.bots.planet_bots import get_random_chinese_name
     # +++ 核心修改 1 结束 +++
 
@@ -84,7 +84,7 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
 
             if not username:
                 username = get_random_chinese_name(bot_type)
-                # 确保生成的中文名是唯一的
+                # ... (用户名去重逻辑不变) ...
                 counter = 1
                 base_username = username
                 while True:
@@ -99,6 +99,7 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
                     return False, "用户名已存在", None
             # +++ 核心修改 2 结束 +++
             
+            # ... (创建用户的剩余逻辑不变) ...
             private_key, public_key = generate_key_pair()
             bot_password = _generate_secure_password(20)
             password_hash = generate_password_hash(bot_password)
@@ -149,7 +150,7 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
             return False, f"机器人供给时发生严重错误: {e}", None
 
 def get_all_bots(include_inactive=False) -> list:
-    """获取所有被标记为机器人的用户。"""
+    # ... (此函数不变) ...
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = """
@@ -168,7 +169,7 @@ def get_all_bots(include_inactive=False) -> list:
         return [dict(row) for row in cursor.fetchall()]
 
 def admin_set_bot_config(public_key: str, action_probability: float) -> (bool, str):
-    """更新一个机器人的配置。"""
+    # ... (此函数不变) ...
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
