@@ -3,13 +3,14 @@
 import json
 import uuid
 from backend.db.database import LEDGER_LOCK, get_db_connection
-from backend.nft_logic import get_handler
 
 def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
     """
     (内部通用函数) 验证一个NFT是否可以被交易。
     返回: (是否可交易, 错误信息, NFT数据字典)
     """
+    from backend.nft_logic import get_handler # <--- 在这里添加 (延迟导入以避免循环)
+
     cursor.execute("SELECT nft_id, owner_key, nft_type, data, status FROM nfts WHERE nft_id = ?", (nft_id,))
     nft_row = cursor.fetchone()
 

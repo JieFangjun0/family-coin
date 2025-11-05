@@ -3,7 +3,7 @@
 # +++ (核心修改) 1. 从新的单一文件导入所有星球机器人 +++
 # 移除旧的机器人，只导入新的
 from .planet_bots import PlanetCapitalistBot
-from .bio_dna import BioDnaHandler # (这个是NFT处理器，放这里好像不对...哦，你是从bio_dna.py导入的)
+# from .bio_dna import BioDnaHandler 
 # 假设你的 bio_dna 机器人逻辑在另一个文件
 # from .bio_dna_bots import ... 
 
