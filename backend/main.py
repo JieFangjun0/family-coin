@@ -299,6 +299,19 @@ class AdminSetBotConfigRequest(BaseModel):
     public_key: str
     action_probability: float
 
+# +++ (新增) 机器人日志 Pydantic 模型 +++
+class BotLogEntry(BaseModel):
+    log_id: str
+    timestamp: float
+    bot_key: str
+    bot_username: str
+    action_type: str
+    message: str
+    data_snapshot: Optional[str] # 保持为 JSON 字符串
+
+class AdminBotLogResponse(BaseModel):
+    logs: List[BotLogEntry]
+# +++ 新增结束 +++
 # --- 管理员认证 ---
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
 GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
@@ -949,14 +962,18 @@ def api_admin_set_bot_config(request: AdminSetBotConfigRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-# --- (移除) 旧的机器人 API ---
-# @app.get("/admin/bots/config", ...)
-# @app.post("/admin/bots/config", ...)
+# +++ (新增) 机器人日志读取 API +++
+@app.get("/admin/bots/logs", response_model=AdminBotLogResponse, tags=["Admin Bots"], dependencies=[Depends(verify_admin)])
+def api_admin_get_bot_logs(public_key: Optional[str] = None, limit: int = 100):
+    """
+    (新增) 获取最新的机器人日志，可选择按特定机器人公钥过滤。
+    """
+    if limit > 500: limit = 500 # 增加上限
+    logs = ledger.admin_get_bot_logs(bot_key=public_key, limit=limit)
+    return AdminBotLogResponse(logs=logs)
+# +++ 新增结束 +++
 
-
-# ==============================================================================
 # --- 管理员接口 ---
-# ==============================================================================
 @app.get("/admin/nft/types", response_model=List[str], tags=["Admin NFT"], dependencies=[Depends(verify_admin)])
 def api_admin_get_nft_types():
     return get_available_nft_types()

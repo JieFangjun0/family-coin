@@ -6,7 +6,7 @@ defineProps({
   },
   value: {
     type: [String, Number],
-    required: true
+    required: false // <--- 核心修改 1: 变为 false
   },
   unit: {
     type: String,
@@ -18,8 +18,13 @@ defineProps({
 <template>
   <div class="balance-card">
     <span class="label">{{ label }}</span>
-    <span class="value">{{ value }} <span v-if="unit" class="unit">{{ unit }}</span></span>
-  </div>
+    
+    <span v-if="value !== undefined" class="value">
+      {{ value }} <span v-if="unit" class="unit">{{ unit }}</span>
+    </span>
+    <span v-else class="value">
+      <slot></slot> </span>
+    </div>
 </template>
 
 <style scoped>
@@ -43,6 +48,10 @@ defineProps({
   font-size: 2rem;
   font-weight: 600;
   color: #2d3748;
+  
+  /* +++ 核心修改 3: 确保插槽内容垂直居中 +++ */
+  display: flex;
+  align-items: center;
 }
 
 .unit {

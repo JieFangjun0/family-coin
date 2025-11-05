@@ -2,6 +2,7 @@
 
 import random
 import time
+import asyncio  # <--- 导入 asyncio
 from backend.bots.base_bot import BaseBot
 from backend.bots.bot_client import BotClient
 
@@ -55,18 +56,15 @@ class PlanetCollectorBot(BaseBot):
         self.dream_stellar_class = random.choice(ALL_STAR_CLASSES)
         self.dream_trait = random.choice(ALL_TRAITS)
         
+        # (修改) 使用 self.log 记录初始化
         self.log(f"已初始化。我的执念是：寻找一颗位于【{self.dream_stellar_class}】" \
                  f"星系的【{self.dream_planet_type}】，" \
-                 f"它必须拥有【{self.dream_trait}】特质！")
+                 f"它必须拥有【{self.dream_trait}】特质！", action_type="INIT")
 
-    def log(self, message: str):
-        """统一的日志格式"""
-        print(f"🪐 '{self.username}' (Collector): {message}")
+    # --- (移除) 旧的 log 方法 (已由 BaseBot 继承) ---
 
     async def execute_turn(self):
         try:
-            self.log("开始评估我的星球帝国...")
-            
             # 1. 状态检查
             balance = await self.client.get_balance()
             my_nfts = await self.client.get_my_nfts()
@@ -75,7 +73,8 @@ class PlanetCollectorBot(BaseBot):
             listed_nft_ids = {l['nft_id'] for l in my_listings if l['status'] == 'ACTIVE'}
             planet_nfts = [nft for nft in my_nfts if nft['nft_type'] == 'PLANET']
             
-            self.log(f"当前状态: {balance:.2f} FC, {len(planet_nfts)} 颗行星。")
+            # +++ (修改) 使用新的 log_turn_snapshot +++
+            self.log_turn_snapshot(balance, planet_nfts, my_listings)
 
             # 2. (行为) 扫描我的行星上的异常信号 (玩自己的NFT)
             balance = await self._action_scan_anomalies(planet_nfts, balance, listed_nft_ids)
@@ -92,10 +91,13 @@ class PlanetCollectorBot(BaseBot):
             # 6. (行为) 发布求购
             await self._action_post_seek_order(balance, my_listings)
             
-            self.log("回合评估结束。")
+            self.log("回合评估结束。", action_type="EVALUATE_END")
 
         except Exception as e:
-            self.log(f"❌ 执行回合时发生严重错误: {e}")
+            self.log(f"❌ 执行回合时发生严重错误: {e}", action_type="ERROR")
+        
+        # +++ (新增) 错峰执行 +++
+        await asyncio.sleep(random.uniform(0.1, 1.0))
 
     def _is_my_dream_planet(self, nft_data: dict) -> bool:
         """检查这颗行星是否符合我的“执念”"""
@@ -105,7 +107,7 @@ class PlanetCollectorBot(BaseBot):
         return has_dream_type and has_dream_trait
 
     async def _action_manage_portfolio(self, planet_nfts: list, listed_nft_ids: set, balance: float) -> float:
-        self.log("正在评估我的行星资产...")
+        self.log("正在评估我的行星资产...", action_type="EVALUATE_PORTFOLIO")
         for nft in planet_nfts:
             if nft['nft_id'] in listed_nft_ids: continue
 
@@ -114,19 +116,19 @@ class PlanetCollectorBot(BaseBot):
             name = data.get('custom_name') or f"行星 {nft['nft_id'][:6]}"
 
             if self._is_my_dream_planet(data):
-                self.log(f"👍 {name} 是我的梦想星球！非卖品！")
+                self.log(f"👍 {name} 是我的梦想星球！非卖品！", action_type="KEEP")
                 continue
 
             if rarity < COLLECTOR_CONFIG["JUNK_RARITY_THRESHOLD"] and data.get('planet_type') != self.dream_planet_type:
                 price = round(random.uniform(15.0, 40.0), 2)
                 desc = f"机器人甩卖: {data.get('planet_type')}, 稀有度 {rarity}"
-                self.log(f"正在以 {price:.2f} FC 甩卖“垃圾”行星: {name} (稀有度 {rarity})")
+                self.log(f"正在以 {price:.2f} FC 甩卖“垃圾”行星: {name} (稀有度 {rarity})", action_type="LIST_SALE")
                 await self.client.create_listing(nft['nft_id'], "PLANET", price, desc, "SALE")
             
             elif rarity > COLLECTOR_CONFIG["VALUABLE_RARITY_THRESHOLD"]:
                 price = round(rarity * 1.5, 2)
                 desc = f"稀有行星拍卖: {data.get('planet_type')}, 稀有度 {rarity}!"
-                self.log(f"正在以 {price:.2f} FC 起拍“珍稀”行星: {name} (稀有度 {rarity})")
+                self.log(f"正在以 {price:.2f} FC 起拍“珍稀”行星: {name} (稀有度 {rarity})", action_type="LIST_AUCTION")
                 await self.client.create_listing(nft['nft_id'], "PLANET", price, desc, "AUCTION", 24)
         return balance
 
@@ -145,7 +147,7 @@ class PlanetCollectorBot(BaseBot):
         anomaly_to_scan = random.choice(nft_to_scan['data']['anomalies'])
         name = nft_to_scan['data'].get('custom_name') or nft_to_scan['nft_id'][:6]
 
-        self.log(f"有 {balance:.2f} FC，花费 {COLLECTOR_CONFIG['SCAN_COST']} FC 扫描行星 {name} 上的 {anomaly_to_scan}...")
+        self.log(f"有 {balance:.2f} FC，花费 {COLLECTOR_CONFIG['SCAN_COST']} FC 扫描行星 {name} 上的 {anomaly_to_scan}...", action_type="NFT_ACTION_SCAN")
         
         success, detail = await self.client.nft_action(
             nft_to_scan['nft_id'], 
@@ -154,21 +156,21 @@ class PlanetCollectorBot(BaseBot):
         )
         
         if success:
-            self.log(f"扫描成功: {detail}")
+            self.log(f"扫描成功: {detail}", action_type="NFT_ACTION_SUCCESS")
             if self.dream_trait in detail:
-                self.log(f"🔥🔥🔥 扫描出了我想要的特质！！{self.dream_trait}！")
+                self.log(f"🔥🔥🔥 扫描出了我想要的特质！！{self.dream_trait}！", action_type="FIND_DREAM_TRAIT")
             return balance - COLLECTOR_CONFIG["SCAN_COST"]
         else:
-            self.log(f"扫描失败: {detail}")
+            self.log(f"扫描失败: {detail}", action_type="NFT_ACTION_FAIL")
             return balance
 
     async def _action_explore(self, balance: float) -> float:
         if balance < COLLECTOR_CONFIG["EXPLORE_COST"]:
-            self.log("没钱了，停止探索。")
+            self.log("没钱了，停止探索。", action_type="SKIP_EXPLORE")
             return balance
 
         if random.random() < 0.75:
-            self.log(f"有 {balance:.2f} FC，花费 {COLLECTOR_CONFIG['EXPLORE_COST']} FC 发射新的探测器...")
+            self.log(f"有 {balance:.2f} FC，花费 {COLLECTOR_CONFIG['EXPLORE_COST']} FC 发射新的探测器...", action_type="SHOP_EXPLORE")
             success, detail, new_nft_id = await self.client.shop_action(
                 "PLANET", 
                 COLLECTOR_CONFIG["EXPLORE_COST"], 
@@ -176,11 +178,11 @@ class PlanetCollectorBot(BaseBot):
                 "probabilistic_mint"
             )
             if success:
-                self.log(f"探索完成: {detail}")
+                self.log(f"探索完成: {detail}", action_type="SHOP_EXPLORE_SUCCESS", data_snapshot={"new_nft_id": new_nft_id})
                 if new_nft_id:
-                    self.log(f"🎉 发现新行星 {new_nft_id[:6]}！赶紧去扫描一下！")
+                    self.log(f"🎉 发现新行星 {new_nft_id[:6]}！赶紧去扫描一下！", action_type="INFO")
             else:
-                self.log(f"探索失败: {detail}")
+                self.log(f"探索失败: {detail}", action_type="SHOP_EXPLORE_FAIL")
             return balance - COLLECTOR_CONFIG["EXPLORE_COST"]
         return balance
 
@@ -195,13 +197,13 @@ class PlanetCollectorBot(BaseBot):
             has_dream_trait = self.dream_trait in data.get('unlocked_traits', [])
 
             if price < COLLECTOR_CONFIG["BARGAIN_SALE_PRICE"] and (is_dream_type or has_dream_trait):
-                self.log(f"👉 捡漏！发现符合执念的行星，价格 {price:.2f} FC，立即购买！")
+                self.log(f"👉 捡漏！发现符合执念的行星，价格 {price:.2f} FC，立即购买！", action_type="MARKET_BUY")
                 success, detail = await self.client.buy_item(item['listing_id'])
                 if success:
-                    self.log(f"购买成功: {detail}")
+                    self.log(f"购买成功: {detail}", action_type="MARKET_BUY_SUCCESS")
                     return balance - price
                 else:
-                    self.log(f"购买失败: {detail}")
+                    self.log(f"购买失败: {detail}", action_type="MARKET_BUY_FAIL")
                 break
 
         auctions = await self.client.get_market_listings("AUCTION")
@@ -217,10 +219,10 @@ class PlanetCollectorBot(BaseBot):
                 my_bid = round(current_bid * 1.15, 2)
                 
                 if my_bid < COLLECTOR_CONFIG["MAX_AUCTION_BID"] and my_bid < balance:
-                    self.log(f"👉 竞拍！发现梦想行星，出价 {my_bid:.2f} FC！")
+                    self.log(f"👉 竞拍！发现梦想行星，出价 {my_bid:.2f} FC！", action_type="MARKET_BID")
                     success, detail = await self.client.place_bid(item['listing_id'], my_bid)
-                    if success: self.log(f"出价成功: {detail}")
-                    else: self.log(f"出价失败: {detail}")
+                    if success: self.log(f"出价成功: {detail}", action_type="MARKET_BID_SUCCESS")
+                    else: self.log(f"出价失败: {detail}", action_type="MARKET_BID_FAIL")
                     break
         return balance
 
@@ -233,7 +235,7 @@ class PlanetCollectorBot(BaseBot):
         )
         
         if not has_active_seek:
-            self.log(f"钱太多了 ({balance:.2f} FC)，发布一个 {COLLECTOR_CONFIG['SEEK_ORDER_BUDGET']} FC 的求购单！")
+            self.log(f"钱太多了 ({balance:.2f} FC)，发布一个 {COLLECTOR_CONFIG['SEEK_ORDER_BUDGET']} FC 的求购单！", action_type="MARKET_SEEK")
             desc = f"重金求购【{self.dream_planet_type}】，必须带【{self.dream_trait}】特质！"
             
             await self.client.create_seek(
@@ -296,17 +298,15 @@ class PlanetSpeculatorBot(BaseBot):
             "MIN_SALE_PRICE": SPECULATOR_RANGES["MIN_SALE_PRICE"],
         }
         
+        # (修改) 使用 self.log 记录初始化
         self.log(f"已初始化。我的个性: 利润率 {self.config['SALE_PROFIT_MARGIN']:.1%}, "
                  f"抄底阈值 {self.config['BUY_DISCOUNT_THRESHOLD']:.1%}, "
-                 f"拍卖阈值 {self.config['AUCTION_RARITY_THRESHOLD']} Rarity")
+                 f"拍卖阈值 {self.config['AUCTION_RARITY_THRESHOLD']} Rarity", action_type="INIT")
 
-    def log(self, message: str):
-        print(f"📈 '{self.username}' (Speculator): {message}")
+    # --- (移除) 旧的 log 方法 (已由 BaseBot 继承) ---
 
     async def execute_turn(self):
         try:
-            self.log("开始投机周期...")
-            
             balance = await self.client.get_balance()
             my_nfts = await self.client.get_my_nfts()
             my_listings, _ = await self.client.get_my_activity()
@@ -315,21 +315,25 @@ class PlanetSpeculatorBot(BaseBot):
             my_planets = [nft for nft in my_nfts if nft['nft_type'] == 'PLANET']
             my_unlisted_planets = [nft for nft in my_planets if nft['nft_id'] not in listed_nft_ids]
             
-            self.log(f"当前状态: {balance:.2f} FC, {len(my_planets)} 颗行星 ({len(my_unlisted_planets)} 未上架)。")
+            # +++ (修改) 使用新的 log_turn_snapshot +++
+            self.log_turn_snapshot(balance, my_unlisted_planets, my_listings)
 
             market_analysis = await self._analyze_market()
             await self._action_sell_inventory(my_unlisted_planets, market_analysis)
             balance = await self._action_scan_market_for_deals(balance, market_analysis)
             balance = await self._action_explore_for_assets(balance, len(my_unlisted_planets), market_analysis)
             
-            self.log("投机周期结束。")
+            self.log("投机周期结束。", action_type="EVALUATE_END")
 
         except Exception as e:
-            self.log(f"❌ 执行回合时发生严重错误: {e}")
+            self.log(f"❌ 执行回合时发生严重错误: {e}", action_type="ERROR")
+        
+        # +++ (新增) 错峰执行 +++
+        await asyncio.sleep(random.uniform(0.1, 1.0))
 
     async def _analyze_market(self) -> dict:
         """(核心) 分析当前市场，计算 P/R 均价"""
-        self.log("正在分析行星市场...")
+        self.log("正在分析行星市场...", action_type="MARKET_ANALYSIS")
         sale_listings = await self.client.get_market_listings("SALE")
         auction_listings = await self.client.get_market_listings("AUCTION")
         
@@ -339,7 +343,7 @@ class PlanetSpeculatorBot(BaseBot):
         ]
         
         if not all_listings:
-            self.log("市场为空，使用默认定价策略。")
+            self.log("市场为空，使用默认定价策略。", action_type="INFO")
             return {
                 'avg_price_per_rarity': self.config["DEFAULT_PRICE_PER_RARITY"], 
                 'floor_price': self.config["DEFAULT_FLOOR_PRICE"], 
@@ -362,7 +366,7 @@ class PlanetSpeculatorBot(BaseBot):
         
         self.log(f"市场分析: 平均P/R: {avg_price_per_rarity:.2f} FC, " \
                  f"地板价: {floor_price:.2f} FC, " \
-                 f"总挂单: {len(all_listings)}")
+                 f"总挂单: {len(all_listings)}", action_type="INFO")
                  
         return {
             'avg_price_per_rarity': avg_price_per_rarity, 
@@ -385,17 +389,17 @@ class PlanetSpeculatorBot(BaseBot):
         if rarity > self.config["AUCTION_RARITY_THRESHOLD"]:
             start_price = round(base_price * self.config["AUCTION_START_MARGIN"], 2)
             desc = f"【稀有拍卖】 {name} [稀有度 {rarity}]! 投机者出货!"
-            self.log(f"正在拍卖稀有行星 {name} (Rarity {rarity})，起拍价 {start_price:.2f} FC")
+            self.log(f"正在拍卖稀有行星 {name} (Rarity {rarity})，起拍价 {start_price:.2f} FC", action_type="LIST_AUCTION")
             await self.client.create_listing(nft_to_sell['nft_id'], "PLANET", start_price, desc, "AUCTION", 12)
         else:
             sale_price = round(base_price * self.config["SALE_PROFIT_MARGIN"], 2)
             desc = f"【投机者出售】 {name} [稀有度 {rarity}]"
-            self.log(f"正在出售行星 {name} (Rarity {rarity})，标价 {sale_price:.2f} FC")
+            self.log(f"正在出售行星 {name} (Rarity {rarity})，标价 {sale_price:.2f} FC", action_type="LIST_SALE")
             await self.client.create_listing(nft_to_sell['nft_id'], "PLANET", sale_price, desc, "SALE")
 
     async def _action_scan_market_for_deals(self, balance: float, market_analysis: dict) -> float:
         """(拟人行为) 扫描市场，抄底一口价商品或竞拍低价拍卖品"""
-        self.log("正在扫描市场寻找被低估的资产...")
+        self.log("正在扫描市场寻找被低估的资产...", action_type="MARKET_SCAN")
         avg_price_per_rarity = market_analysis['avg_price_per_rarity']
         
         # --- 1. 扫描“一口价” (抄底) ---
@@ -411,24 +415,24 @@ class PlanetSpeculatorBot(BaseBot):
             
             if item_price_per_rarity < (avg_price_per_rarity * self.config["BUY_DISCOUNT_THRESHOLD"]):
                 if price < balance: bargains.append(item)
-                else: self.log(f"发现 {item['description']} 是个好价钱，但我钱 ({balance:.2f}) 不够买 ({price:.2f})")
+                else: self.log(f"发现 {item['description']} 是个好价钱，但我钱 ({balance:.2f}) 不够买 ({price:.2f})", action_type="INFO")
 
         if bargains:
             item_to_buy = random.choice(bargains)
             price_to_pay = item_to_buy['price']
             
-            self.log(f"👉 抄底！买入 {item_to_buy['description']}，价格 {price_to_pay:.2f} FC！")
+            self.log(f"👉 抄底！买入 {item_to_buy['description']}，价格 {price_to_pay:.2f} FC！", action_type="MARKET_BUY")
             success, detail = await self.client.buy_item(item_to_buy['listing_id'])
             
             if success:
-                self.log(f"抄底成功: {detail}")
+                self.log(f"抄底成功: {detail}", action_type="MARKET_BUY_SUCCESS")
                 return balance - price_to_pay
             else:
-                self.log(f"抄底失败: {detail}")
+                self.log(f"抄底失败: {detail}", action_type="MARKET_BUY_FAIL")
                 return balance
         
         # --- 2. (新增) 扫描“拍卖行” (竞拍) ---
-        self.log("正在扫描拍卖行寻找投机机会...")
+        self.log("正在扫描拍卖行寻找投机机会...", action_type="MARKET_SCAN_AUCTION")
         auctions = await self.client.get_market_listings("AUCTION")
         
         potential_bids = []
@@ -449,27 +453,27 @@ class PlanetSpeculatorBot(BaseBot):
                     my_bid = round(current_bid_price + 0.01, 2)
                 if my_bid > my_max_spec_bid:
                     self.log(f"发现 {item['description']} 有利润空间，但加价后 ({my_bid:.2f}) "
-                             f"超过了我的投机上限 ({my_max_spec_bid:.2f})，放弃。")
+                             f"超过了我的投机上限 ({my_max_spec_bid:.2f})，放弃。", action_type="INFO")
                     continue
                 if my_bid > balance:
-                    self.log(f"发现 {item['description']} 值得竞拍，但我钱 ({balance:.2f}) 不够出价 ({my_bid:.2f})")
+                    self.log(f"发现 {item['description']} 值得竞拍，但我钱 ({balance:.2f}) 不够出价 ({my_bid:.2f})", action_type="INFO")
                     continue
                 potential_bids.append((item['listing_id'], my_bid))
         
         if not potential_bids:
-            self.log("拍卖行中没有值得竞拍的资产。")
+            self.log("拍卖行中没有值得竞拍的资产。", action_type="MARKET_SCAN_DONE")
             return balance
 
         listing_id_to_bid, bid_amount = random.choice(potential_bids)
         
-        self.log(f"👉 竞拍！发现 {listing_id_to_bid[:8]} 值得投机，出价 {bid_amount:.2f} FC！")
+        self.log(f"👉 竞拍！发现 {listing_id_to_bid[:8]} 值得投机，出价 {bid_amount:.2f} FC！", action_type="MARKET_BID")
         success, detail = await self.client.place_bid(listing_id_to_bid, bid_amount)
         
         if success:
-            self.log(f"竞拍出价成功: {detail}")
+            self.log(f"竞拍出价成功: {detail}", action_type="MARKET_BID_SUCCESS")
             return balance - bid_amount 
         else:
-            self.log(f"竞拍出价失败: {detail}")
+            self.log(f"竞拍出价失败: {detail}", action_type="MARKET_BID_FAIL")
             return balance
 
     async def _action_explore_for_assets(self, balance: float, inventory_count: int, market_analysis: dict) -> float:
@@ -480,7 +484,7 @@ class PlanetSpeculatorBot(BaseBot):
         inventory_is_low = inventory_count < self.config["MAX_INVENTORY_BEFORE_STOP_EXPLORE"]
         
         if (market_is_dry or inventory_is_low) and random.random() < self.config["EXPLORE_CHANCE"]:
-            self.log(f"市场冷清或库存不足，花费 {self.config['EXPLORE_COST']} FC 探索新行星...")
+            self.log(f"市场冷清或库存不足，花费 {self.config['EXPLORE_COST']} FC 探索新行星...", action_type="SHOP_EXPLORE")
             success, detail, new_nft_id = await self.client.shop_action(
                 "PLANET", 
                 self.config["EXPLORE_COST"], 
@@ -488,11 +492,11 @@ class PlanetSpeculatorBot(BaseBot):
                 "probabilistic_mint"
             )
             if success:
-                self.log(f"探索完成: {detail}")
+                self.log(f"探索完成: {detail}", action_type="SHOP_EXPLORE_SUCCESS", data_snapshot={"new_nft_id": new_nft_id})
                 if new_nft_id:
-                    self.log(f"🎉 发现新资产 {new_nft_id[:6]}！下回合评估卖出。")
+                    self.log(f"🎉 发现新资产 {new_nft_id[:6]}！下回合评估卖出。", action_type="INFO")
             else:
-                self.log(f"探索失败: {detail}")
+                self.log(f"探索失败: {detail}", action_type="SHOP_EXPLORE_FAIL")
             return balance - self.config["EXPLORE_COST"]
         
         return balance
@@ -526,19 +530,15 @@ class PlanetGamblerBot(BaseBot):
 
     def __init__(self, client: BotClient):
         super().__init__(client)
-        self.log(f"已初始化。我感觉今天手气不错！")
+        self.log(f"已初始化。我感觉今天手气不错！", action_type="INIT")
 
-    def log(self, message: str):
-        """统一的日志格式"""
-        print(f"🎲 '{self.username}' (Gambler): {message}")
+    # --- (移除) 旧的 log 方法 (已由 BaseBot 继承) ---
 
     async def execute_turn(self):
         """
         赌徒的回合：随机三选一
         """
         try:
-            self.log("开始我的回合！")
-            
             balance = await self.client.get_balance()
             my_nfts = await self.client.get_my_nfts()
             my_listings, _ = await self.client.get_my_activity()
@@ -549,11 +549,10 @@ class PlanetGamblerBot(BaseBot):
                 if nft['nft_type'] == 'PLANET' and nft['nft_id'] not in listed_nft_ids
             ]
             
-            self.log(f"我有 {balance:.2f} FC 和 {len(my_unlisted_planets)} 颗可以折腾的行星。")
+            # +++ (修改) 使用新的 log_turn_snapshot +++
+            self.log_turn_snapshot(balance, my_unlisted_planets, my_listings)
 
             if random.random() < GAMBLER_CONFIG["ACTION_CHANCE"]:
-                self.log("我得做点什么...")
-                
                 # 随机决定做什么
                 possible_actions = []
                 if balance > GAMBLER_CONFIG["EXPLORE_COST"]:
@@ -564,11 +563,11 @@ class PlanetGamblerBot(BaseBot):
                     possible_actions.append("BUY")
                 
                 if not possible_actions:
-                    self.log("哎，啥也干不了。")
+                    self.log("哎，啥也干不了。", action_type="SKIP_TURN")
                     return
 
                 action = random.choice(possible_actions)
-                self.log(f"我决定... {action}！")
+                self.log(f"我决定... {action}！", action_type="DECISION")
 
                 if action == "EXPLORE":
                     await self._action_explore(balance)
@@ -578,14 +577,17 @@ class PlanetGamblerBot(BaseBot):
                     await self._action_buy(balance)
             
             else:
-                self.log("这回合我选择“观望”。")
+                self.log("这回合我选择“观望”。", action_type="SKIP_TURN")
 
         except Exception as e:
-            self.log(f"❌ 执行回合时发生严重错误: {e}")
+            self.log(f"❌ 执行回合时发生严重错误: {e}", action_type="ERROR")
+        
+        # +++ (新增) 错峰执行 +++
+        await asyncio.sleep(random.uniform(0.1, 1.0))
 
     async def _action_explore(self, balance: float):
         """(赌徒行为) 探索，就是为了开奖"""
-        self.log(f"搏一搏！花费 {GAMBLER_CONFIG['EXPLORE_COST']} FC 探索！")
+        self.log(f"搏一搏！花费 {GAMBLER_CONFIG['EXPLORE_COST']} FC 探索！", action_type="SHOP_EXPLORE")
         success, detail, new_nft_id = await self.client.shop_action(
             "PLANET", 
             GAMBLER_CONFIG["EXPLORE_COST"], 
@@ -593,10 +595,10 @@ class PlanetGamblerBot(BaseBot):
             "probabilistic_mint"
         )
         if success:
-            self.log(f"探索结果: {detail}")
-            if new_nft_id: self.log(f"新玩具 {new_nft_id[:6]} 到手！")
+            self.log(f"探索结果: {detail}", action_type="SHOP_EXPLORE_SUCCESS", data_snapshot={"new_nft_id": new_nft_id})
+            if new_nft_id: self.log(f"新玩具 {new_nft_id[:6]} 到手！", action_type="INFO")
         else:
-            self.log(f"探索失败: {detail}")
+            self.log(f"探索失败: {detail}", action_type="SHOP_EXPLORE_FAIL")
 
     async def _action_sell(self, unlisted_planets: list):
         """(赌徒行为) 随机选一个，标个离谱的价卖掉"""
@@ -611,14 +613,14 @@ class PlanetGamblerBot(BaseBot):
         
         desc = f"【赌徒的珍藏】 {name} [稀有度 {data.get('rarity_score', {}).get('total', '?')}]"
         
-        self.log(f"我要把 {name} 卖 {price:.2f} FC！ ({listing_type})，它肯定值这个价！")
+        self.log(f"我要把 {name} 卖 {price:.2f} FC！ ({listing_type})，它肯定值这个价！", action_type=f"LIST_{listing_type.upper()}")
         await self.client.create_listing(
             nft_to_sell['nft_id'], "PLANET", price, desc, listing_type, auction_hours
         )
 
     async def _action_buy(self, balance: float):
         """(赌徒行为) 随机买一个我买得起的"""
-        self.log("逛逛市场，看上哪个买哪个...")
+        self.log("逛逛市场，看上哪个买哪个...", action_type="MARKET_SCAN")
         sale_listings = await self.client.get_market_listings("SALE")
         auction_listings = await self.client.get_market_listings("AUCTION")
         
@@ -628,7 +630,7 @@ class PlanetGamblerBot(BaseBot):
         ]
 
         if not all_listings:
-            self.log("市场是空的，没得买。")
+            self.log("市场是空的，没得买。", action_type="MARKET_SCAN_DONE")
             return
 
         # 找出所有我买得起的
@@ -639,7 +641,7 @@ class PlanetGamblerBot(BaseBot):
                 buyable_items.append(item)
 
         if not buyable_items:
-            self.log("都太贵了，买不起。")
+            self.log("都太贵了，买不起。", action_type="MARKET_SCAN_DONE")
             return
             
         # 随机挑一个
@@ -647,12 +649,12 @@ class PlanetGamblerBot(BaseBot):
         
         if item_to_buy['listing_type'] == "SALE":
             price_to_pay = item_to_buy['price']
-            self.log(f"👉 我看上了 {item_to_buy['description']}！{price_to_pay:.2f} FC，买了！")
+            self.log(f"👉 我看上了 {item_to_buy['description']}！{price_to_pay:.2f} FC，买了！", action_type="MARKET_BUY")
             success, detail = await self.client.buy_item(item_to_buy['listing_id'])
             if success:
-                self.log(f"购买成功: {detail}")
+                self.log(f"购买成功: {detail}", action_type="MARKET_BUY_SUCCESS")
             else:
-                self.log(f"购买失败: {detail}")
+                self.log(f"购买失败: {detail}", action_type="MARKET_BUY_FAIL")
         
         elif item_to_buy['listing_type'] == "AUCTION":
             current_price = item_to_buy.get('highest_bid', 0) or item_to_buy.get('price')
@@ -665,12 +667,12 @@ class PlanetGamblerBot(BaseBot):
                 my_bid = round(current_price + 0.01, 2)
 
             if my_bid > balance:
-                self.log(f"我看上了 {item_to_buy['description']}，但我的疯狂出价 ({my_bid:.2f}) 超过了我的余额 ({balance:.2f})")
+                self.log(f"我看上了 {item_to_buy['description']}，但我的疯狂出价 ({my_bid:.2f}) 超过了我的余额 ({balance:.2f})", action_type="MARKET_BID_FAIL")
                 return
 
-            self.log(f"👉 我一定要得到 {item_to_buy['description']}！出价 {my_bid:.2f} FC！")
+            self.log(f"👉 我一定要得到 {item_to_buy['description']}！出价 {my_bid:.2f} FC！", action_type="MARKET_BID")
             success, detail = await self.client.place_bid(item_to_buy['listing_id'], my_bid)
             if success:
-                self.log(f"出价成功: {detail}")
+                self.log(f"出价成功: {detail}", action_type="MARKET_BID_SUCCESS")
             else:
-                self.log(f"出价失败: {detail}")
+                self.log(f"出价失败: {detail}", action_type="MARKET_BID_FAIL")

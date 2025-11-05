@@ -113,6 +113,15 @@ def run_bot_loop():
                 check_interval = 30
             # +++ 新增结束 +++
 
+            # 1. (新增) 在机器人回合开始前，先结算一次拍卖
+            print(f"--- 机器人回合：正在结算已结束的拍卖... ---")
+            try:
+                resolved_count = ledger.resolve_finished_auctions()
+                if resolved_count > 0:
+                    print(f"--- 机器人回合：成功结算了 {resolved_count} 场拍卖。 ---")
+            except Exception as e:
+                print(f"❌ Bot Runner: 结算拍卖时出错: {e}")
+
             # 2. 动态调整机器人实例 (登录/注销)
             loop.run_until_complete(update_active_bots())
             

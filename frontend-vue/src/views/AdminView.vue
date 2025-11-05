@@ -23,7 +23,10 @@ const nftMintHelpText = ref('') // For bug #3
 const allBots = ref([])
 const botTypes = ref([])
 const showBotManager = ref(null) // 用于显示单个机器人的管理模态框
-
+// +++ (新增) 机器人日志状态 +++
+const botLogs = ref([])
+const logFilterKey = ref('') // 用于日志过滤
+// +++ 新增结束 +++
 // --- Forms ---
 const forms = reactive({
   issue: { to_key: '', amount: 1000, note: '管理员增发' },
@@ -113,13 +116,16 @@ async function fetchData() {
   errorMessage.value = null
   successMessage.value = null;
   
-  // (修改) 并行获取 V2 机器人 API 数据
-  const [usersRes, balancesRes, nftTypesRes, botListRes, botTypesRes] = await Promise.all([
+  const [usersRes, balancesRes, nftTypesRes, botListRes, botTypesRes, botLogsRes] = await Promise.all([
     apiCall('GET', '/users/list', { params: { public_key: authStore.userInfo.publicKey } }),
     apiCall('GET', '/admin/balances', { headers: adminHeaders.value }),
     apiCall('GET', '/admin/nft/types', { headers: adminHeaders.value }),
     apiCall('GET', '/admin/bots/list', { headers: adminHeaders.value }),
-    apiCall('GET', '/admin/bots/types', { headers: adminHeaders.value })
+    apiCall('GET', '/admin/bots/types', { headers: adminHeaders.value }),
+    apiCall('GET', '/admin/bots/logs', { 
+      headers: adminHeaders.value,
+      params: { public_key: logFilterKey.value || null, limit: 100 }
+    }) 
   ]);
 
   // (不变) Process users
@@ -155,7 +161,12 @@ async function fetchData() {
       forms.bots.create.bot_type = botTypes.value[0];
     }
   }
-  
+  // +++ (新增) Process V2 Bot Logs +++
+  if (botLogsRes[1]) {
+    errorMessage.value = (errorMessage.value || '') + `\n加载机器人日志失败: ${botLogsRes[1]}`
+  } else {
+    botLogs.value = botLogsRes[0].logs
+  }
   // (修改) Fetch settings (包括机器人的)
   await fetchSettings(['default_invitation_quota', 'welcome_bonus_amount', 'inviter_bonus_amount', 'bot_system_enabled', 'bot_check_interval_seconds'])
 
@@ -176,6 +187,19 @@ async function fetchSettings(keys) {
     }
 }
 
+// +++ (新增) 专门用于刷新日志的方法 +++
+async function fetchLogsOnly() {
+  const [botLogsRes, error] = await apiCall('GET', '/admin/bots/logs', { 
+    headers: adminHeaders.value,
+    params: { public_key: logFilterKey.value || null, limit: 100 }
+  });
+  if (error) {
+    errorMessage.value = `加载机器人日志失败: ${error}`;
+  } else {
+    botLogs.value = botLogsRes.logs;
+    successMessage.value = "日志已刷新";
+  }
+}
 async function handleApiCall(method, endpoint, payload, successMsg, options = {}) {
   const { skipFetch = false } = options;
   successMessage.value = null
@@ -360,6 +384,7 @@ onMounted(() => {
       <div class="admin-tabs">
         <button :class="{ active: activeTab === 'balances' }" @click="activeTab = 'balances'">人类用户</button>
         <button :class="{ active: activeTab === 'bots' }" @click="activeTab = 'bots'">🤖 机器人管理</button>
+        <button :class="{ active: activeTab === 'bot_logs' }" @click="activeTab = 'bot_logs'">📊 机器人日志</button>
         <button :class="{ active: activeTab === 'currency' }" @click="activeTab = 'currency'">货币管理</button>
         <button :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户管理 (旧)</button>
         <button :class="{ active: activeTab === 'nft' }" @click="activeTab = 'nft'">NFT 管理</button>
@@ -481,6 +506,51 @@ onMounted(() => {
                     管理
                   </button>
                 </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div v-if="activeTab === 'bot_logs'" class="tab-content">
+        <h2>📊 机器人日志</h2>
+        <p class="subtitle">查看机器人最近的操作。日志按时间倒序排列。</p>
+        
+        <div class="log-filter-bar">
+          <div class="form-group">
+            <label for="log_filter">按机器人筛选</label>
+            <select id="log_filter" v-model="logFilterKey">
+              <option value="">-- 显示所有机器人的日志 --</option>
+              <option v-for="bot in allBots" :key="bot.public_key" :value="bot.public_key">
+                {{ bot.username }} ({{ bot.bot_type }})
+              </option>
+            </select>
+          </div>
+          <button @click="fetchLogsOnly">刷新日志</button>
+        </div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>机器人</th>
+                <th>动作类型</th>
+                <th>日志消息</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="botLogs.length === 0">
+                <td colspan="4" style="text-align: center; padding: 2rem;">没有找到日志记录。</td>
+              </tr>
+              <tr v-for="log in botLogs" :key="log.log_id">
+                <td class="timestamp">{{ formatTimestamp(log.timestamp) }}</td>
+                <td>{{ log.bot_username }}</td>
+                <td class="action-type">
+                  <span :class="['action-tag', log.action_type.toLowerCase()]">
+                    {{ log.action_type }}
+                  </span>
+                </td>
+                <td class="log-message">{{ log.message }}</td>
               </tr>
             </tbody>
           </table>
@@ -777,7 +847,53 @@ h3.divider-header {
 .manage-button {
   background-color: #3182ce;
 }
+/* +++ (新增) 日志标签页特定样式 +++ */
+.log-filter-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  margin-bottom: 1.5rem;
+  padding: 1.5rem;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.log-filter-bar .form-group {
+  flex-grow: 1;
+  margin: 0;
+}
+.log-filter-bar button {
+  height: 44px; /* 与 input/select 高度对齐 */
+  flex-shrink: 0;
+}
 
+td.timestamp {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #718096;
+}
+td.log-message {
+  white-space: normal;
+  word-break: break-word;
+  min-width: 300px;
+}
+.action-type .action-tag {
+  font-family: monospace;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background-color: #e2e8f0;
+  color: #4a5568;
+}
+.action-type .action-tag.error { background-color: #fed7d7; color: #c53030; }
+.action-type .action-tag.evaluate_start { background-color: #f7fafc; border: 1px solid #e2e8f0; }
+.action-type .action-tag.list_sale { background-color: #e6fffa; color: #234e52; }
+.action-type .action-tag.list_auction { background-color: #fefcbf; color: #744210; }
+.action-type .action-tag.market_buy { background-color: #c6f6d5; color: #2f855a; }
+.action-type .action-tag.market_bid { background-color: #bee3f8; color: #2c5282; }
+.action-type .action-tag.shop_explore { background-color: #faf5ff; color: #553c9a; }
+.action-type .action-tag.nft_action_scan { background-color: #feebc8; color: #975a16; }
 /* (新增) 模态框样式 */
 .modal-overlay {
   position: fixed;
@@ -825,4 +941,5 @@ h3.divider-header {
   padding-top: 1rem;
   border-top: 2px solid #e53e3e;
 }
+
 </style>

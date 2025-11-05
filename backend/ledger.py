@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from werkzeug.security import generate_password_hash, check_password_hash
 from shared.crypto_utils import verify_signature, generate_key_pair
 from backend.nft_logic import get_handler
-from typing import Optional # <--- (新增) 导入 Optional
+from typing import Optional, List
 
 DATABASE_PATH = '/app/data/ledger.db'
 LEDGER_LOCK = threading.Lock()
@@ -38,6 +38,7 @@ def get_db_connection():
     conn = None
     try:
         conn = sqlite3.connect(DATABASE_PATH)
+        conn.execute("PRAGMA journal_mode=WAL;")  # <--- 新增这一行
         conn.row_factory = sqlite3.Row
         yield conn
     except Exception as e:
@@ -126,8 +127,6 @@ def init_db():
         )
         ''')
         
-        # <<< 核心修改: 废弃旧的 shop_items 表 >>>
-        cursor.execute("DROP TABLE IF EXISTS shop_items")
 
         # <<< 核心修改: 新建 nfts 表 (不变) >>>
         cursor.execute('''
@@ -196,6 +195,22 @@ def init_db():
         )
         ''')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_bids_listing_id ON auction_bids (listing_id)")
+        # +++ 新增：机器人日志表 +++
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_logs (
+            log_id TEXT PRIMARY KEY,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            bot_key TEXT NOT NULL,
+            bot_username TEXT,
+            action_type TEXT NOT NULL,
+            message TEXT NOT NULL,
+            data_snapshot TEXT,
+            FOREIGN KEY (bot_key) REFERENCES users (public_key)
+        )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bot_logs_bot_key ON bot_logs (bot_key)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bot_logs_timestamp ON bot_logs (timestamp)")
+        # +++ 新增结束 +++
         # --- 设置表等 (不变) ---
         cursor.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
         cursor.execute('CREATE TABLE IF NOT EXISTS invitation_codes (code TEXT PRIMARY KEY, generated_by TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_used BOOLEAN DEFAULT 0, used_by TEXT, FOREIGN KEY (generated_by) REFERENCES users (public_key))')
@@ -213,8 +228,55 @@ def init_db():
         conn.commit()
         print("数据库初始化完成 (V3.2 Bots Re-arch)。")
 
-# --- 机器人管理核心 (重构) ---
+# +++ 新增：机器人日志写入函数 +++
+def log_bot_action(bot_key: str, bot_username: str, action_type: str, message: str, data_snapshot: dict = None):
+    """
+    (线程安全) 将机器人的操作记录到数据库。
+    此函数会获取锁并建立自己的连接，以便从机器人线程安全调用。
+    """
+    with LEDGER_LOCK, get_db_connection() as conn:
+        try:
+            cursor = conn.cursor()
+            log_id = str(uuid.uuid4())
+            data_json = json.dumps(data_snapshot, ensure_ascii=False) if data_snapshot else None
+            
+            cursor.execute(
+                """
+                INSERT INTO bot_logs (log_id, bot_key, bot_username, action_type, message, data_snapshot)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (log_id, bot_key, bot_username, action_type, message, data_json)
+            )
+            conn.commit()
+        except Exception as e:
+            # 日志写入失败不应使整个机器人崩溃，但我们必须在控制台打印错误
+            print(f"!!!!!!!!!!!!!! 严重错误：无法将机器人日志写入数据库 !!!!!!!!!!!!!!")
+            print(f"错误: {e}")
+            print(f"日志内容: [{bot_username}/{action_type}] {message}")
+            conn.rollback()
 
+# +++ 新增：机器人日志读取函数 +++
+def admin_get_bot_logs(bot_key: Optional[str] = None, limit: int = 100) -> List[dict]:
+    """(管理员功能) 从数据库获取最新的机器人日志。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT log_id, CAST(strftime('%s', timestamp) AS REAL) as timestamp, 
+                   bot_key, bot_username, action_type, message, data_snapshot
+            FROM bot_logs
+        """
+        params = []
+        
+        if bot_key:
+            query += " WHERE bot_key = ?"
+            params.append(bot_key)
+            
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+# --- 机器人管理核心---
 def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: float, action_probability: float) -> (bool, str, dict):
     """(修改) 管理员创建并供给一个机器人用户 (支持自动命名)。"""
     with LEDGER_LOCK, get_db_connection() as conn:
@@ -757,7 +819,7 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
 
 def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
     """获取市场上的所有挂单。"""
-    resolve_finished_auctions()
+    #resolve_finished_auctions()
     with get_db_connection() as conn:
         cursor = conn.cursor()
         # VVVVVV  修改下面这个查询语句  VVVVVV
