@@ -8,9 +8,14 @@ services:
       - ./data:/app/data
       - ./backend:/app/backend
       - ./shared:/app/shared
+    
+    # +++ 核心修改：移除硬编码的密码 +++
+    # 现在这些值将从根目录的 .env 文件中自动加载
     environment:
-      - ADMIN_SECRET_KEY=JIEFANGJUNISKING
-      - GENESIS_PASSWORD=babamama
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
+      - GENESIS_PASSWORD=${GENESIS_PASSWORD}
+    # +++ 修改结束 +++
+
     networks:
       - familycoin-net
 

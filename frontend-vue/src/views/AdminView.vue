@@ -242,6 +242,56 @@ async function fetchSettings(keys) {
         }
     }
 }
+
+// +++ 修复BUG 1：添加缺失的 handleApiCall 辅助函数 +++
+/**
+ * 通用的 API 调用处理器
+ * @param {Promise} apiPromise - apiCall(...) 的 Promise
+ * @param {string} successMsg - 成功时显示的默认消息
+ * @param {string} errorPrefix - 失败时显示的消息前缀
+ * @returns {Promise<boolean>} - 返回操作是否成功
+ */
+async function handleApiCall(apiPromise, successMsg, errorPrefix) {
+  successMessage.value = null
+  errorMessage.value = null
+  const [data, error] = await apiPromise
+  if (error) {
+    errorMessage.value = `${errorPrefix}: ${error}`
+    return false
+  } else {
+    successMessage.value = data.detail || successMsg
+    return true
+  }
+}
+// +++ 修复BUG 1 结束 +++
+
+// +++ 修复BUG 1：添加缺失的 handleCreateBot 函数 +++
+async function handleCreateBot() {
+  const { username, bot_type, initial_funds, action_probability } = forms.bots.create
+  
+  const payload = {
+    username: username || null, // 后端接受 null 或空字符串
+    bot_type: bot_type,
+    initial_funds: initial_funds,
+    action_probability: action_probability
+  }
+
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/bots/create', { payload, headers: adminHeaders.value }),
+    `机器人 ${username || bot_type} 创建成功！`,
+    '创建机器人失败'
+  )
+  
+  if (success) {
+    // 清空表单
+    forms.bots.create.username = ''
+    // 重新加载数据 (会刷新机器人列表和日志)
+    await fetchData()
+  }
+}
+// +++ 修复BUG 1 结束 +++
+
+
 // ... (handleApiCall, handleSetSetting, handleSingleIssue, handleMultiIssue, handleBurn, handleAdjustQuota, handleToggleUserStatus, handleResetPassword, handlePurgeUser, handleMintNft, handleNukeSystem remain the same) ...
 // ... (handleSaveBotGlobalSettings, handleCreateBot, openBotManager, closeBotManager, handleToggleBotStatus, handleSetBotProbability, handleIssueToBot, handleBurnFromBot, handlePurgeBot remain the same) ...
 
@@ -453,8 +503,8 @@ onMounted(() => {
             <h3>创建新机器人</h3>
              <div class="form-group">
                 <label for="bot_username">机器人用户名 (留空则自动生成)</label>
-                <input id="bot_username" type="text" v-model="forms.bots.create.username" placeholder="例如: Bot_Seller_001" />
-             </div>
+                <input id="bot_username" type="text" v-model="forms.bots.create.username" placeholder="例如: 行星收藏家 (留空可自动命名)" />
+                </div>
              <div class="form-group">
                 <label for="bot_type">机器人类型</label>
                 <select id="bot_type" v-model="forms.bots.create.bot_type">
