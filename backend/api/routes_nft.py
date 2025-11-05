@@ -1,6 +1,7 @@
 # backend/api/routes_nft.py
 
 from fastapi import APIRouter, HTTPException
+import json
 from typing import List
 from backend.db import queries_nft
 from backend.db import queries_user
@@ -13,28 +14,28 @@ from backend.nft_logic import NFT_HANDLERS, get_handler
 
 router = APIRouter()
 
-@router.get("/nfts/display_names", tags=["NFT"])
+@router.get("/display_names", tags=["NFT"])
 def api_get_nft_display_names():
     names = {}
     for nft_type, handler_class in NFT_HANDLERS.items():
         names[nft_type] = handler_class.get_display_name()
     return names
 
-@router.get("/nfts/my", response_model=NFTListResponse, tags=["NFT"])
+@router.get("/my", response_model=NFTListResponse, tags=["NFT"])
 def api_get_my_nfts(public_key: str):
     if not public_key:
         raise HTTPException(status_code=400, detail="必须提供公钥")
     nfts = queries_nft.get_nfts_by_owner(public_key)
     return NFTListResponse(nfts=nfts)
 
-@router.get("/nfts/{nft_id}", response_model=NFTResponse, tags=["NFT"])
+@router.get("/{nft_id}", response_model=NFTResponse, tags=["NFT"])
 def api_get_nft_details(nft_id: str):
     nft = queries_nft.get_nft_by_id(nft_id)
     if not nft:
         raise HTTPException(status_code=404, detail="未找到该 NFT")
     return NFTResponse(**nft)
 
-@router.post("/nfts/action", response_model=SuccessResponse, tags=["NFT"])
+@router.post("/action", response_model=SuccessResponse, tags=["NFT"])
 def api_perform_nft_action(request: NFTActionRequest):
     message = get_verified_nft_action_message(request, NFTActionMessage)
     

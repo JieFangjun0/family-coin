@@ -5,7 +5,7 @@ import asyncio
 import random
 from backend.bots import BOT_LOGIC_MAP
 from backend.bots.bot_client import BotClient
-from backend import ledger
+from backend.db import queries_bots,database
 
 API_BASE_URL = "http://backend:8000"
 
@@ -23,7 +23,7 @@ async def update_active_bots():
         # 1. 从数据库获取所有激活的机器人
         # (这是一个IO调用，但在
 # 循环中是可接受的)
-        active_db_bots_list = ledger.get_all_bots(include_inactive=False)
+        active_db_bots_list = queries_bots.get_all_bots(include_inactive=False)
         active_db_bots = {bot['public_key']: bot for bot in active_db_bots_list}
         
     except Exception as e:
@@ -95,8 +95,8 @@ def run_bot_loop():
             # +++ (新增) 1. 从数据库读取宏观设置 +++
             try:
                 # (这是同步函数，但在此线程循环中是允许的)
-                enabled_str = ledger.get_setting("bot_system_enabled")
-                interval_str = ledger.get_setting("bot_check_interval_seconds")
+                enabled_str = database.get_setting("bot_system_enabled")
+                interval_str = database.get_setting("bot_check_interval_seconds")
                 
                 bot_system_enabled = enabled_str == 'True'
                 check_interval = int(interval_str) if interval_str else 30

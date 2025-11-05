@@ -16,18 +16,18 @@ from backend.db import queries_user
 
 router = APIRouter()
 
-@router.get("/market/listings", tags=["Market"])
+@router.get("/listings", tags=["Market"])
 def api_get_market_listings(listing_type: str, exclude_owner: str = None):
     items = queries_market.get_market_listings(listing_type=listing_type, exclude_owner=exclude_owner)
     # 注意：get_market_listings 内部已经处理了 trade_description
     return {"listings": items}
 
-@router.get("/market/my_activity", tags=["Market"])
+@router.get("/my_activity", tags=["Market"])
 def api_get_my_activity(public_key: str):
     activity = queries_market.get_my_market_activity(public_key)
     return activity
 
-@router.get("/market/offers", tags=["Market"])
+@router.get("/offers", tags=["Market"])
 def api_get_offers(listing_id: str):
     offers = queries_market.get_offers_for_listing(listing_id)
     # 为报价中的 NFT 添加
@@ -45,12 +45,12 @@ def api_get_offers(listing_id: str):
             
     return {"offers": offers}
 
-@router.get("/market/listings/{listing_id}/bids", response_model=List[BidHistoryResponse], tags=["Market"])
+@router.get("/listings/{listing_id}/bids", response_model=List[BidHistoryResponse], tags=["Market"])
 def api_get_bid_history(listing_id: str):
     bids = queries_market.get_bids_for_listing(listing_id)
     return bids
 
-@router.post("/market/create_listing", response_model=SuccessResponse, tags=["Market"])
+@router.post("/create_listing", response_model=SuccessResponse, tags=["Market"])
 def api_create_listing(request: MarketSignedRequest):
     message = get_verified_message(request, MarketListingRequest)
     success, detail = queries_market.create_market_listing(
@@ -66,7 +66,7 @@ def api_create_listing(request: MarketSignedRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@router.post("/market/cancel_listing", response_model=SuccessResponse, tags=["Market"])
+@router.post("/cancel_listing", response_model=SuccessResponse, tags=["Market"])
 def api_cancel_listing(request: MarketSignedRequest):
     message = get_verified_message(request, MarketActionMessage)
     success, detail = queries_market.cancel_market_listing(
@@ -77,7 +77,7 @@ def api_cancel_listing(request: MarketSignedRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@router.post("/market/buy", response_model=SuccessResponse, tags=["Market"])
+@router.post("/buy", response_model=SuccessResponse, tags=["Market"])
 def api_buy_nft(request: MarketSignedRequest):
     message = get_verified_message(request, MarketActionMessage)
     success, detail = queries_market.execute_sale(
@@ -88,7 +88,7 @@ def api_buy_nft(request: MarketSignedRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@router.post("/market/place_bid", response_model=SuccessResponse, tags=["Market"])
+@router.post("/place_bid", response_model=SuccessResponse, tags=["Market"])
 def api_place_bid(request: MarketSignedRequest):
     message = get_verified_message(request, MarketBidRequest)
     success, detail = queries_market.place_auction_bid(
@@ -100,7 +100,7 @@ def api_place_bid(request: MarketSignedRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@router.post("/market/make_offer", response_model=SuccessResponse, tags=["Market"])
+@router.post("/make_offer", response_model=SuccessResponse, tags=["Market"])
 def api_make_offer(request: MarketSignedRequest):
     message = get_verified_message(request, MarketOfferRequest)
     success, detail = queries_market.make_seek_offer(
@@ -112,7 +112,7 @@ def api_make_offer(request: MarketSignedRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@router.post("/market/respond_offer", response_model=SuccessResponse, tags=["Market"])
+@router.post("/respond_offer", response_model=SuccessResponse, tags=["Market"])
 def api_respond_offer(request: MarketSignedRequest):
     message = get_verified_message(request, MarketOfferResponseRequest)
     success, detail = queries_market.respond_to_seek_offer(
@@ -124,7 +124,7 @@ def api_respond_offer(request: MarketSignedRequest):
         raise HTTPException(status_code=400, detail=detail)
     return SuccessResponse(detail=detail)
 
-@router.get("/market/creatable_nfts", tags=["Market"])
+@router.get("/creatable_nfts", tags=["Market"])
 def api_get_creatable_nfts():
     configs = {}
     for nft_type, handler_class in NFT_HANDLERS.items():
@@ -133,7 +133,7 @@ def api_get_creatable_nfts():
             configs[nft_type] = config
     return configs
 
-@router.post("/market/create_nft", response_model=Dict, tags=["Market"])
+@router.post("/create_nft", response_model=Dict, tags=["Market"])
 def api_create_nft_from_shop(request: MarketSignedRequest):
     message = get_verified_message(request, ShopCreateNftRequest)
     
@@ -174,7 +174,7 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
 
     return {"detail": f"铸造成功！你获得了新的 {config.get('name', 'NFT')}!", "nft_id": nft_id}
 
-@router.post("/market/shop_action", response_model=Dict, tags=["Market"])
+@router.post("/shop_action", response_model=Dict, tags=["Market"])
 def api_perform_shop_action(request: MarketSignedRequest):
     message = get_verified_message(request, ShopActionRequest)
 

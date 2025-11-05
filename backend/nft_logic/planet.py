@@ -4,7 +4,7 @@ import random
 import time
 import uuid
 from .base import NFTLogicHandler
-from backend import ledger
+from backend.db import queries_nft
 # --- 扩展的世界观设定 ---
 
 # 恒星等级 -> (中文名, 基础稀有度)
@@ -113,7 +113,7 @@ class PlanetHandler(NFTLogicHandler):
         
         if random.random() < PROBABILITY_OF_DISCOVERY:
             planet_data = cls()._generate_planet_data(owner_key, owner_username)
-            success, detail, nft_id = ledger.mint_nft(
+            success, detail, nft_id = queries_nft.mint_nft(
                 owner_key=owner_key, nft_type="PLANET", data=planet_data, conn=conn
             )
             if not success: return False, f"发现星球但铸造失败: {detail}", None

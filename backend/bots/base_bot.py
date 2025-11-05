@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from backend.bots.bot_client import BotClient
-from backend import ledger  # +++ 导入 ledger +++
+from backend.db import queries_bots  # +++ 导入 ledger +++
 import json # +++ 导入 json +++
 class BaseBot(ABC):
     """
@@ -28,7 +28,7 @@ class BaseBot(ABC):
         # 2. 尝试写入数据库
         try:
             # (这是一个线程安全的函数)
-            ledger.log_bot_action(
+            queries_bots.log_bot_action(
                 bot_key=self.client.public_key,
                 bot_username=self.username,
                 action_type=action_type.upper(),
