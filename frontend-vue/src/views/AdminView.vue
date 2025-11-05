@@ -320,6 +320,195 @@ async function handleSaveBotGlobalSettings() {
 }
 // +++ BUG 修复结束 +++
 
+//
+// --- 🚩🚩🚩 开始：补全所有缺失的函数 🚩🚩🚩 ---
+//
+
+async function handleToggleUserStatus(user) {
+  const newStatus = !user.is_active;
+  const payload = {
+    public_key: user.public_key,
+    is_active: newStatus
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/set_user_active_status', { payload, headers: adminHeaders.value }),
+    `用户 ${user.username} 状态已更新为 ${newStatus ? '活跃' : '禁用'}` ,
+    '更新用户状态失败'
+  );
+  if (success) {
+    await fetchData(); // 刷新所有数据
+  }
+}
+
+async function handleSingleIssue() {
+  const payload = { ...forms.issue };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/issue', { payload, headers: adminHeaders.value }),
+    '增发成功！',
+    '增发失败'
+  );
+  if (success) {
+    forms.issue.to_key = '';
+    forms.issue.amount = 1000;
+    await fetchData(); // 刷新余额
+  }
+}
+
+async function handleMultiIssue() {
+  const targets = forms.multiIssue.user_keys.map(key => ({
+    key: key,
+    amount: forms.multiIssue.amount
+  }));
+  
+  if (targets.length === 0) {
+    errorMessage.value = "请至少选择一个用户。";
+    return;
+  }
+
+  const payload = {
+    targets: targets,
+    note: forms.multiIssue.note
+  };
+  
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/multi_issue', { payload, headers: adminHeaders.value }),
+    '批量增发成功！',
+    '批量增发失败'
+  );
+  if (success) {
+    forms.multiIssue.user_keys = [];
+    await fetchData(); // 刷新余额
+  }
+}
+
+async function handleBurn() {
+  // 确保选择了用户
+  if (!forms.burn.from_key) {
+      errorMessage.value = "请先在“精细管理”下拉菜单中选择一个用户。";
+      return;
+  }
+  const payload = { ...forms.burn };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/burn', { payload, headers: adminHeaders.value }),
+    '减持成功！',
+    '减持失败'
+  );
+  if (success) {
+    await fetchData(); // 刷新余额
+  }
+}
+
+async function handleAdjustQuota() {
+  // 确保选择了用户
+  if (!forms.burn.from_key) {
+      errorMessage.value = "请先在“精细管理”下拉菜单中选择一个用户。";
+      return;
+  }
+  const payload = {
+    public_key: forms.burn.from_key, // 使用所选用户
+    new_quota: forms.adjustQuota.new_quota
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/adjust_quota', { payload, headers: adminHeaders.value }),
+    '额度调整成功！',
+    '额度调整失败'
+  );
+  if (success) {
+    await fetchData(); // 刷新用户列表
+  }
+}
+
+async function handleResetPassword() {
+  // 确保选择了用户
+  if (!forms.burn.from_key) {
+      errorMessage.value = "请先在“精细管理”下拉菜单中选择一个用户。";
+      return;
+  }
+  const payload = {
+    public_key: forms.burn.from_key, // 使用所选用户
+    new_password: forms.resetPassword.new_password
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/reset_password', { payload, headers: adminHeaders.value }),
+    '密码重置成功！',
+    '密码重置失败'
+  );
+  if (success) {
+    forms.resetPassword.new_password = '';
+  }
+}
+
+async function handlePurgeUser(publicKey, confirmUsername, actualUsername) {
+  if (confirmUsername !== actualUsername) {
+    errorMessage.value = "确认用户名输入不正确，操作已取消。";
+    return;
+  }
+  if (!confirm(`【极度危险】你真的要清除用户 ${actualUsername} 吗？此操作不可逆！`)) {
+    return;
+  }
+
+  const payload = { public_key: publicKey };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/purge_user', { payload, headers: adminHeaders.value }),
+    '用户清除成功！',
+    '用户清除失败'
+  );
+  if (success) {
+    forms.burn.from_key = ''; // 清除所选用户
+    forms.purgeUser.confirm_username = '';
+    await fetchData(); // 刷新所有数据
+  }
+}
+
+async function handleMintNft() {
+  let jsonData;
+  try {
+    jsonData = JSON.parse(forms.mintNft.data);
+  } catch (e) {
+    errorMessage.value = `Data 字段中的 JSON 格式错误: ${e.message}`;
+    return;
+  }
+  
+  if (!forms.mintNft.to_key || !forms.mintNft.nft_type) {
+      errorMessage.value = "请选择接收用户和 NFT 类型。";
+      return;
+  }
+
+  const payload = {
+    to_key: forms.mintNft.to_key,
+    nft_type: forms.mintNft.nft_type,
+    data: jsonData
+  };
+  
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/nft/mint', { payload, headers: adminHeaders.value }),
+    'NFT 铸造成功！',
+    'NFT 铸造失败'
+  );
+  // (成功后不重置表单，方便管理员连续铸造)
+}
+
+async function handleNukeSystem() {
+  if (forms.nuke.confirm_text !== 'NUKE ALL DATA') {
+    errorMessage.value = "确认文本输入不正确，操作已取消。";
+    return;
+  }
+  if (!confirm('【【【 终极危险 】】】你确定要删除所有数据并重置系统吗？！？！？')) {
+    return;
+  }
+
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/nuke_system', { headers: adminHeaders.value }),
+    '系统已重置！请重新加载页面以注册创世用户。',
+    '系统重置失败'
+  );
+  if (success) {
+    // 强制重新加载页面
+    setTimeout(() => window.location.reload(), 2000);
+  }
+}
+
+// --- 机器人相关函数 ---
 
 async function handleCreateBot() {
   const { username, bot_type, initial_funds, action_probability } = forms.bots.create
@@ -342,7 +531,110 @@ async function handleCreateBot() {
     await fetchData()
   }
 }
-// ... (所有其他 handle... 函数保持不变) ...
+
+function openBotManager(bot) {
+  forms.bots.manage.public_key = bot.public_key;
+  forms.bots.manage.new_probability = bot.action_probability;
+  forms.bots.manage.issue_amount = 100;
+  forms.bots.manage.burn_amount = 100;
+  forms.bots.manage.confirm_purge = '';
+  showBotManager.value = bot; // This shows the modal
+}
+
+function closeBotManager() {
+  showBotManager.value = null;
+}
+
+async function handleToggleBotStatus(bot) {
+  const newStatus = !bot.is_active;
+  const payload = {
+    public_key: bot.public_key,
+    is_active: newStatus
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/set_user_active_status', { payload, headers: adminHeaders.value }),
+    `机器人 ${bot.username} 状态已更新为 ${newStatus ? '活跃' : '禁用'}` ,
+    '更新机器人状态失败'
+  );
+  if (success) {
+    await fetchData();
+  }
+}
+
+async function handleSetBotProbability() {
+  const payload = {
+    public_key: forms.bots.manage.public_key,
+    action_probability: forms.bots.manage.new_probability
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/bots/set_config', { payload, headers: adminHeaders.value }),
+    '机器人概率已更新！',
+    '更新机器人概率失败'
+  );
+  if (success) {
+    await fetchData();
+    closeBotManager();
+  }
+}
+
+async function handleIssueToBot() {
+  const payload = {
+    to_key: forms.bots.manage.public_key,
+    amount: forms.bots.manage.issue_amount,
+    note: "管理员为机器人增发"
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/issue', { payload, headers: adminHeaders.value }),
+    '机器人增发成功！',
+    '机器人增发失败'
+  );
+  if (success) {
+    await fetchData();
+    closeBotManager();
+  }
+}
+
+async function handleBurnFromBot() {
+  const payload = {
+    from_key: forms.bots.manage.public_key,
+    amount: forms.bots.manage.burn_amount,
+    note: "管理员从机器人减持"
+  };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/burn', { payload, headers: adminHeaders.value }),
+    '机器人减持成功！',
+    '机器人减持失败'
+  );
+  if (success) {
+    await fetchData();
+    closeBotManager();
+  }
+}
+
+async function handlePurgeBot() {
+  if (forms.bots.manage.confirm_purge !== showBotManager.value.username) {
+    errorMessage.value = "确认用户名输入不正确，操作已取消。";
+    return;
+  }
+  if (!confirm(`【危险】你真的要清除机器人 ${showBotManager.value.username} 吗？`)) {
+    return;
+  }
+  
+  const payload = { public_key: forms.bots.manage.public_key };
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/purge_user', { payload, headers: adminHeaders.value }),
+    '机器人清除成功！',
+    '机器人清除失败'
+  );
+  if (success) {
+    await fetchData();
+    closeBotManager();
+  }
+}
+//
+// --- 🚩🚩🚩 结束：补全所有缺失的函数 🚩🚩🚩 ---
+//
+
 
 // +++ 核心修改 3：更新 onMounted 逻辑 +++
 onMounted(() => {
