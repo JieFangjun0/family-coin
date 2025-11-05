@@ -9,6 +9,15 @@ from typing import Type
 
 from shared.crypto_utils import verify_signature
 
+# --- 导入模型 ---
+from backend.api.models import (
+    MarketSignedRequest, NFTActionRequest, NFTActionMessage,
+    ProfileUpdateRequest, TransactionMessage, MessageGenerateCode,
+    FriendActionMessage, FriendRespondMessage, MarketListingRequest,
+    MarketActionMessage, MarketBidRequest, MarketOfferRequest,
+    MarketOfferResponseRequest, ShopCreateNftRequest, ShopActionRequest
+)
+
 # --- Admin Auth ---
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
 GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
@@ -19,15 +28,6 @@ def verify_admin(x_admin_secret: str = Header(None)):
     return True
 
 # --- Signature Verification ---
-
-# 导入所需的模型
-from backend.api.models import (
-    MarketSignedRequest, NFTActionRequest, NFTActionMessage,
-    ProfileUpdateRequest, TransactionMessage, MessageGenerateCode,
-    FriendActionMessage, FriendRespondMessage, MarketListingRequest,
-    MarketActionMessage, MarketBidRequest, MarketOfferRequest,
-    MarketOfferResponseRequest, ShopCreateNftRequest, ShopActionRequest
-)
 
 def get_verified_message(request: MarketSignedRequest, model: Type[BaseModel]):
     """
