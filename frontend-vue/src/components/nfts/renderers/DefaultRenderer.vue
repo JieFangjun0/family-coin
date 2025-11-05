@@ -1,16 +1,33 @@
-<!-- 架构已统一：Vue前端现在完全遵循了你最初设计的、基于context的解耦渲染模式。ShopView.vue 只负责展示商品框架（价格、卖家），而商品具体内容的展示则完全交由各个独立的NFT渲染器组件负责。
-可维护性增强：未来添加新的NFT类型，你只需要创建一个新的渲染器组件，在其中定义好 collection 和 market 两种上下文的显示方式，然后在 renderer-registry.js 中注册即可，ShopView.vue 无需任何改动。 -->
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   nft: {
     type: Object,
     required: true
-  }
+  },
+  // --- 新增 prop ---
+  collapsed: { type: Boolean, default: false }
+  // --- 新增结束 ---
 })
 // 这个备用组件不提供上架功能
+
+const summaryHtml = computed(() => {
+    return `
+        <div class="summary-wrapper">
+            <span class="nft-type-unknown">未知类型</span>
+            <span class="nft-title">${props.nft.nft_type} (${props.nft.nft_id?.substring(0, 8)})</span>
+        </div>
+    `
+})
 </script>
 
 <template>
+  <template v-if="collapsed">
+    <slot name="summary" :summary="summaryHtml"></slot>
+  </template>
+
+  <template v-else>
     <div class="nft-header">
         <span class="nft-type-unknown">{{ nft.nft_type }}</span>
         <h3 class="nft-name">未知类型的 NFT</h3>
@@ -19,6 +36,7 @@ defineProps({
         <p>没有找到该类型的专属渲染器。以下是它的原始数据：</p>
         <pre>{{ JSON.stringify(nft.data, null, 2) }}</pre>
     </div>
+  </template>
 </template>
 
 <style scoped>
@@ -37,4 +55,23 @@ pre {
   word-break: break-all;
   font-size: 0.8rem;
 }
+
+/* --- Summary 内部样式 (保持不变) --- */
+.summary-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.nft-type-unknown { /* 重用原有标签样式 */
+    flex-shrink: 0;
+}
+.nft-title {
+    font-size: 1.0rem;
+    font-weight: 600;
+    color: #2d3748;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+/* --- 样式结束 --- */
 </style>
