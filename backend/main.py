@@ -13,6 +13,7 @@ from backend.api import routes_friends
 from backend.api import routes_nft
 from backend.api import routes_market
 from backend.api import routes_admin
+from backend.api import routes_notifications
 
 app = FastAPI(
     title="FamilyCoin API (V0.4.0 - Refactored)",
@@ -53,6 +54,8 @@ app.include_router(routes_market.router, prefix="/market", tags=["Market"])
 # 6. 管理员路由 (/admin/...)
 app.include_router(routes_admin.router, prefix="/admin", tags=["Admin"])
 
+# 7. 通知路由 (/notifications/...) <<< 新增 >>>
+app.include_router(routes_notifications.router, tags=["Notifications"])
 
 # --- 启动 (用于本地调试) ---
 if __name__ == "__main__":

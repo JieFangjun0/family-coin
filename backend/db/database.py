@@ -86,6 +86,18 @@ def init_db():
         )
         ''')
         
+        # <<< --- 新增：通知表 --- >>>
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+            notif_id TEXT PRIMARY KEY,
+            user_key TEXT NOT NULL,
+            message TEXT NOT NULL,
+            is_read BOOLEAN DEFAULT 0,
+            timestamp REAL NOT NULL,
+            FOREIGN KEY (user_key) REFERENCES users (public_key)
+        )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user_key ON notifications (user_key, is_read)")
         # <<< --- 新增：好友关系表 --- >>>
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS friendships (
@@ -302,6 +314,25 @@ def _execute_system_tx_logic(from_key, to_key, amount, note, conn):
     except Exception as e:
         return False, f"系统操作数据库失败: {e}"
 
+# --- 通知函数 (新增) ---
+
+def create_notification(user_key: str, message: str, conn):
+    """
+    (内部函数) 在事务连接中为指定用户创建一条通知。
+    """
+    try:
+        cursor = conn.cursor()
+        notif_id = str(uuid.uuid4())
+        # 确保 timestamp 使用 time.time() 的浮点数
+        cursor.execute(
+            "INSERT INTO notifications (notif_id, user_key, message, is_read, timestamp) VALUES (?, ?, ?, ?, ?)",
+            (notif_id, user_key, message, 0, time.time())
+        )
+        return True, "通知创建成功"
+    except Exception as e:
+        print(f"!!!!!!!!!!!!!! 严重错误：无法创建通知 for {user_key[:10]}... !!!!!!!!!!!!!!")
+        print(f"错误: {e}")
+        return False, f"通知创建失败: {e}"
 def _create_system_transaction(from_key: str, to_key: str, amount: float, note: str = None, conn=None) -> (bool, str):
     """(重构) 创建一笔系统交易 (铸币/销毁/托管)。"""
     def run_logic(connection):

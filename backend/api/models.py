@@ -309,3 +309,16 @@ class AdminMarketTradeHistoryEntry(BaseModel):
 
 class AdminMarketTradeHistoryResponse(BaseModel):
     history: List[AdminMarketTradeHistoryEntry]
+    
+# --- Notifications (新增) ---
+
+class NotificationEntry(BaseModel):
+    notif_id: str
+    user_key: str
+    message: str
+    is_read: bool
+    timestamp: float
+
+class NotificationListResponse(BaseModel):
+    notifications: List[NotificationEntry]
+    unread_count: int

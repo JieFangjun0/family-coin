@@ -5,7 +5,7 @@ import json
 import uuid
 from typing import List
 
-from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, ESCROW_ACCOUNT
+from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, ESCROW_ACCOUNT, create_notification
 from backend.db.queries_nft import _validate_nft_for_trade, _change_nft_owner
 from backend.db.queries_user import get_balance
 from backend.nft_logic import get_handler
@@ -139,6 +139,17 @@ def execute_sale(buyer_key: str, listing_id: str) -> (bool, str):
                 conn=conn, listing_id=listing_id, nft_id=nft_id, nft_type=listing['nft_type'],
                 trade_type='SALE', seller_key=seller_key, buyer_key=buyer_key, price=price
             )
+            # <<< 新增通知 >>>
+            create_notification(
+                user_key=seller_key,
+                message=f"🎉 你的 NFT (ID: {nft_id[:8]}...) 已被购买，你收到了 {price:.2f} FC！",
+                conn=conn
+            )
+            create_notification(
+                user_key=buyer_key,
+                message=f"🎉 你成功购买了 NFT (ID: {nft_id[:8]}...)！",
+                conn=conn
+            )
             conn.commit()
             return True, "购买成功！"
         except Exception as e:
@@ -166,9 +177,21 @@ def place_auction_bid(bidder_key: str, listing_id: str, bid_amount: float) -> (b
 
             if listing['highest_bidder']:
                 success, detail = _create_system_transaction(ESCROW_ACCOUNT, listing['highest_bidder'], listing['highest_bid'], f"拍卖出价被超过，退款", conn)
+                # <<< 新增通知：通知上一位出价者被超 >>>
+                create_notification(
+                    user_key=listing['highest_bidder'],
+                    message=f"出价被超过！你在拍卖品 {listing_id[:8]}... 上的出价 ({listing['highest_bid']:.2f} FC) 已被 {bid_amount:.2f} FC 超越，资金已退还。",
+                    conn=conn
+                )
                 if not success:
                     conn.rollback()
                     return False, f"退还上一位出价者资金失败: {detail}"
+            # <<< 新增通知：通知卖家有人出价 >>>
+            create_notification(
+                user_key=listing['lister_key'],
+                message=f"你的拍卖品 {listing_id[:8]}... 收到新出价 {bid_amount:.2f} FC！",
+                conn=conn
+            )
             
             success, detail = _create_system_transaction(bidder_key, ESCROW_ACCOUNT, bid_amount, f"托管拍卖出价", conn)
             if not success:
@@ -223,11 +246,28 @@ def resolve_finished_auctions():
                     conn=conn, listing_id=listing_id, nft_id=nft_id, nft_type=auction['nft_type'],
                     trade_type='AUCTION', seller_key=seller_key, buyer_key=winner_key, price=final_price
                 )
+                # <<< 新增通知：拍卖成交 >>>
+                create_notification(
+                    user_key=seller_key,
+                    message=f"💰 你的拍卖品 {nft_id[:8]}... 已成交，你收到了 {final_price:.2f} FC！",
+                    conn=conn
+                )
+                create_notification(
+                    user_key=winner_key,
+                    message=f"🎉 恭喜！你以 {final_price:.2f} FC 成功拍下 NFT {nft_id[:8]}...！",
+                    conn=conn
+                )
             else:
                 # 流拍
                 success, detail = _change_nft_owner(nft_id, auction['lister_key'], conn)
                 if not success: continue
                 cursor.execute("UPDATE market_listings SET status = 'EXPIRED' WHERE listing_id = ?", (listing_id,))
+                # <<< 新增通知：拍卖流拍 >>>
+                create_notification(
+                    user_key=auction['lister_key'],
+                    message=f"💔 你的拍卖品 {nft_id[:8]}... 流拍，NFT已退回。",
+                    conn=conn
+                )
             
             resolved_count += 1
         conn.commit()
@@ -284,6 +324,12 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             if not accept:
                 cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE offer_id = ?", (offer_id,))
                 conn.commit()
+                # <<< 新增通知：报价被拒 >>>
+                create_notification(
+                    user_key=offerer_key,
+                    message=f"你的报价被拒。求购单 {listing_id[:8]}... 的发布者拒绝了你的 NFT 报价。",
+                    conn=conn
+                )
                 return True, "已拒绝该报价"
 
             offerer_key = offer_details['offerer_key']
@@ -303,6 +349,17 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
 
             cursor.execute("UPDATE market_offers SET status = 'ACCEPTED' WHERE offer_id = ?", (offer_id,))
             cursor.execute("UPDATE market_listings SET status = 'FULFILLED' WHERE listing_id = ?", (listing_id,))
+            # <<< 新增通知：报价被接受 >>>
+            create_notification(
+                user_key=offerer_key,
+                message=f"🎉 恭喜！你的 NFT 报价被接受，你收到了 {price:.2f} FC！",
+                conn=conn
+            )
+            create_notification(
+                user_key=seeker_key,
+                message=f"🎉 你成功完成了求购交易，获得了新的 NFT！",
+                conn=conn
+            )
             cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE listing_id = ? AND status = 'PENDING'", (listing_id,))
             
             _log_market_trade(

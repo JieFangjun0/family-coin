@@ -10,9 +10,10 @@ from shared.crypto_utils import verify_signature, generate_key_pair
 from backend.db.database import (
     LEDGER_LOCK, get_db_connection, _create_system_transaction,
     _generate_uid, _generate_secure_password, get_setting,
+    create_notification,
     GENESIS_ACCOUNT, BURN_ACCOUNT, ESCROW_ACCOUNT, DEFAULT_INVITATION_QUOTA
 )
-
+import uuid
 # --- 余额 ---
 
 def get_balance(public_key: str) -> float:
@@ -339,6 +340,15 @@ def process_transaction(
             cursor.execute(
                 "INSERT INTO transactions (tx_id, from_key, to_key, amount, timestamp, message_json, signature, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (tx_id, from_key, to_key, amount, message['timestamp'], message_json, signature, note)
+            )
+            # <<< 新增通知 >>>
+            to_username = cursor.execute("SELECT username FROM users WHERE public_key = ?", (to_key,)).fetchone()['username']
+            from_username = cursor.execute("SELECT username FROM users WHERE public_key = ?", (from_key,)).fetchone()['username']
+            
+            create_notification(
+                user_key=to_key,
+                message=f"💰 你收到了来自 {from_username} 的 {amount:.2f} FC 转账。",
+                conn=conn
             )
             
             conn.commit()
