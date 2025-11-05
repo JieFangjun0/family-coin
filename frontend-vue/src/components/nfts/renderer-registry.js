@@ -15,7 +15,7 @@ export const defaultRenderer = {
 }
 
 /**
- * NFT 渲染器和搜索逻辑的注册表
+ * 藏品渲染器和搜索逻辑的注册表
  * 这满足了将翻译逻辑保留在各自 .vue 文件中的约束
  */
 export const nftRendererRegistry = {

@@ -223,11 +223,33 @@ function handleBreed() {
 </script>
 
 <script>
+const RARITY_MAP = {
+    "COMMON": "普通", "UNCOMMON": "罕见", "RARE": "稀有", "MYTHIC": "神话"
+}
+const GENDER_MAP = { "Male": "雄性", "Female": "雌性" }
+const PERSONALITY_MAP = {
+    "Timid": "胆小", "Brave": "勇敢", "Goofy": "滑稽", "Calm": "冷静", 
+    "Lazy": "懒惰", "Hyper": "活泼", "Serious": "严肃", "Elegant": "优雅"
+}
+const GENE_VALUE_MAP = {
+    "Red": "红色", "White": "白色", "Black": "黑色", "Yellow": "黄色",
+    "Blue": "蓝色", "Green": "绿色", "Purple": "紫色", "Silver": "银色",
+    "Solid": "纯色", "Stripes": "条纹", "Spots": "斑点", "None": "无",
+    "Sparkle": "闪耀", "Glow": "辉光", "Shadow": "暗影"
+}
+
 // 必须放在常规 <script> 块中才能具名导出
 export function getSearchableText(data) {
   if (!data) return '';
-  // 允许用户搜索自己的秘密内容（仅在收藏视图中）
-  return [data.description, data.content].join(' ');
+  const visible = data.visible_traits || {};
+  return [
+    data.species_name,
+    GENDER_MAP[data.gender] || '',
+    PERSONALITY_MAP[data.personality] || '',
+    GENE_VALUE_MAP[visible.color] || '',
+    GENE_VALUE_MAP[visible.pattern] || '',
+    GENE_VALUE_MAP[visible.aura] || '',
+  ].join(' ');
 }
 </script>
 

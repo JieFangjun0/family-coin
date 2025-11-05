@@ -16,7 +16,11 @@ const props = defineProps({
 const emit = defineEmits(['action'])
 
 const rendererComponent = computed(() => {
-  return nftRendererRegistry[props.nft.nft_type] || defaultRenderer
+  // 从注册表获取 handler 对象
+  const handler = nftRendererRegistry[props.nft.nft_type] || defaultRenderer;
+  
+  // 返回 handler 对象中的 'component' 属性
+  return handler.component; 
 })
 
 // --- 新增: 内部折叠状态，默认折叠 ---
@@ -33,7 +37,7 @@ function toggleCollapse() {
 function onAction(action, payload) {
   // +++ 核心修改 3：添加销毁确认 +++
   if (action === 'destroy') {
-    if (!confirm('你确定要永久销毁这个 NFT 吗？此操作不可撤销！')) {
+    if (!confirm('你确定要永久销毁这个 藏品 吗？此操作不可撤销！')) {
       return
     }
   }
