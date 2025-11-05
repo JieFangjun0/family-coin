@@ -253,6 +253,74 @@ async function handleApiCall(apiPromise, successMsg, errorPrefix) {
     return true
   }
 }
+
+// +++ BUG 修复 1：添加 handleSetSetting 函数 +++
+async function handleSetSetting(key) {
+  const value = forms.settings[key];
+  if (value === undefined) {
+    errorMessage.value = `内部错误：找不到设置 ${key}`;
+    return;
+  }
+
+  // 后端需要字符串格式的值
+  const payload = {
+    key: key,
+    value: String(value)
+  };
+
+  const success = await handleApiCall(
+    apiCall('POST', '/admin/set_setting', { 
+      payload, 
+      headers: adminHeaders.value 
+    }),
+    `设置 '${key}' 已成功更新！`,
+    `更新 '${key}' 失败`
+  );
+  
+  if (success) {
+    // 重新获取该设置以确认
+    await fetchSettings([key]); 
+  }
+}
+
+// +++ BUG 修复 2：添加 handleSaveBotGlobalSettings 函数 +++
+async function handleSaveBotGlobalSettings() {
+  successMessage.value = null;
+  errorMessage.value = null;
+  
+  const key1 = 'bot_system_enabled';
+  const key2 = 'bot_check_interval_seconds';
+  
+  const payload1 = { key: key1, value: String(forms.settings[key1]) };
+  const payload2 = { key: key2, value: String(forms.settings[key2]) };
+
+  // 并行发送两个更新请求
+  const [res1, res2] = await Promise.all([
+    apiCall('POST', '/admin/set_setting', { payload: payload1, headers: adminHeaders.value }),
+    apiCall('POST', '/admin/set_setting', { payload: payload2, headers: adminHeaders.value })
+  ]);
+
+  let hasError = false;
+  let errorMsg = '';
+  
+  if (res1[1]) { // res1[1] 是 error
+    hasError = true;
+    errorMsg += `更新 '${key1}' 失败: ${res1[1]} \n`;
+  }
+  if (res2[1]) { // res2[1] 是 error
+    hasError = true;
+    errorMsg += `更新 '${key2}' 失败: ${res2[1]} \n`;
+  }
+
+  if (hasError) {
+    errorMessage.value = errorMsg;
+  } else {
+    successMessage.value = "机器人全局设置已保存！";
+  }
+}
+// +++ BUG 修复结束 +++
+
+
 async function handleCreateBot() {
   const { username, bot_type, initial_funds, action_probability } = forms.bots.create
   

@@ -36,7 +36,8 @@ def api_genesis_register(request: GenesisRegisterRequest):
 
     return GenesisRegisterResponse(**user_data)
 
-router.get("/settings/public", response_model=PublicSettingsResponse, tags=["System"])
+# +++ 修正：在这里添加 @ 符号 +++
+@router.get("/settings/public", response_model=PublicSettingsResponse, tags=["System"])
 def api_get_public_settings():
     """
     获取公开的、非敏感的系统设置，例如邀请奖励。
