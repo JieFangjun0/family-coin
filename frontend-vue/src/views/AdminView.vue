@@ -1,11 +1,9 @@
 <script setup>
-import { ref, onMounted, reactive, computed, watch } from 'vue'
+import { ref, onMounted, reactive, computed, watch } from 'vue' // +++ 引入 watch +++
 import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { formatCurrency, formatTimestamp } from '@/utils/formatters'
-// +++ 核心修改 1: 导入 ClickableUsername +++
 import ClickableUsername from '@/components/global/ClickableUsername.vue'
-// +++ 核心修改 1 结束 +++
 
 const authStore = useAuthStore()
 
@@ -13,7 +11,10 @@ const authStore = useAuthStore()
 const isLoading = ref(true)
 const errorMessage = ref(null)
 const successMessage = ref(null)
-const adminSecret = ref('')
+
+// +++ 核心修改 1：从 localStorage 读取 adminSecret +++
+const adminSecret = ref(localStorage.getItem('adminSecret') || '')
+
 const activeTab = ref('user_management') 
 
 // --- 数据 ---
@@ -24,9 +25,7 @@ const nftMintHelpText = ref('')
 
 // 机器人状态
 const allBots = ref([])
-// +++ 核心修改 2: 存储完整的 Bot 类型配置 +++
 const botTypeConfigs = ref({}) 
-// +++ 核心修改 2 结束 +++
 const showBotManager = ref(null) // 用于显示单个机器人的管理模态框
 const botLogs = ref([])
 const logFilterKey = ref('') // 用于日志过滤
@@ -73,11 +72,9 @@ const forms = reactive({
 const userOptions = computed(() => {
   return allBalances.value.map(u => ({ text: `${u.username} (UID: ${u.uid})`, value: u.public_key }))
 })
-// +++ 核心修改 3: 计算属性：Bot 类型列表 +++
 const botTypes = computed(() => {
   return Object.keys(botTypeConfigs.value)
 })
-// +++ 核心修改 3 结束 +++
 
 // 这个计算属性现在用于“用户管理”标签页中的精细管理
 const selectedUserForManagement = computed(() => {
@@ -85,13 +82,17 @@ const selectedUserForManagement = computed(() => {
   return allBalances.value.find(u => u.public_key === key);
 })
 
-// +++ 核心修改 4: 辅助函数：根据类型字符串获取中文名 +++
 const getBotDisplayName = (botType) => {
   return botTypeConfigs.value[botType]?.display_name || botType
 }
-// +++ 核心修改 4 结束 +++
 
 // --- 侦听器 ---
+
+// +++ 核心修改 2：添加 watch 以持久化 adminSecret +++
+watch(adminSecret, (newValue) => {
+  localStorage.setItem('adminSecret', newValue)
+})
+
 // 当NFT类型改变时，加载对应的帮助信息和默认JSON
 watch(() => forms.mintNft.nft_type, async (newType) => {
   if (!newType || !adminSecret.value) return;
@@ -108,7 +109,7 @@ watch(() => forms.mintNft.nft_type, async (newType) => {
   }
 })
 
-// +++ 核心修改 5: 侦听器：当机器人类型改变时，更新默认值 +++
+// 当机器人类型改变时，更新默认值
 watch(() => forms.bots.create.bot_type, (newType) => {
   const config = botTypeConfigs.value[newType]
   if (config) {
@@ -116,7 +117,6 @@ watch(() => forms.bots.create.bot_type, (newType) => {
     forms.bots.create.action_probability = config.action_probability
   }
 })
-// +++ 核心修改 5 结束 +++
 
 // --- API 请求头 ---
 const adminHeaders = computed(() => ({ 'X-Admin-Secret': adminSecret.value }))
@@ -172,7 +172,7 @@ async function fetchData() {
     allBots.value = botListRes[0].bots.sort((a,b) => a.username.localeCompare(b.username));
   }
   
-  // +++ 核心修改 6: 处理机器人类型配置 +++
+  // 处理机器人类型配置
   if (botTypesRes[1]) {
      errorMessage.value = (errorMessage.value || '') + `\n加载机器人类型失败: ${botTypesRes[1]}`
   } else {
@@ -181,7 +181,6 @@ async function fetchData() {
       forms.bots.create.bot_type = botTypes.value[0];
     }
   }
-  // +++ 核心修改 6 结束 +++
 
   // 处理机器人日志
   if (botLogsRes[1]) {
@@ -190,7 +189,7 @@ async function fetchData() {
     botLogs.value = botLogsRes[0].logs
   }
 
-  // +++ (新增) Process Market History +++
+  // Process Market History
   if (marketHistoryRes[1]) {
       errorMessage.value = (errorMessage.value || '') + `\n加载市场日志失败: ${marketHistoryRes[1]}`
   } else {
@@ -229,7 +228,6 @@ async function fetchMarketHistoryOnly() {
 }
 
 async function fetchSettings(keys) {
-  // ... (fetchSettings remains the same) ...
     for (const key of keys) {
         const [data, error] = await apiCall('GET', `/admin/setting/${key}`, { headers: adminHeaders.value });
         if (!error) {
@@ -243,14 +241,6 @@ async function fetchSettings(keys) {
     }
 }
 
-// +++ 修复BUG 1：添加缺失的 handleApiCall 辅助函数 +++
-/**
- * 通用的 API 调用处理器
- * @param {Promise} apiPromise - apiCall(...) 的 Promise
- * @param {string} successMsg - 成功时显示的默认消息
- * @param {string} errorPrefix - 失败时显示的消息前缀
- * @returns {Promise<boolean>} - 返回操作是否成功
- */
 async function handleApiCall(apiPromise, successMsg, errorPrefix) {
   successMessage.value = null
   errorMessage.value = null
@@ -263,14 +253,11 @@ async function handleApiCall(apiPromise, successMsg, errorPrefix) {
     return true
   }
 }
-// +++ 修复BUG 1 结束 +++
-
-// +++ 修复BUG 1：添加缺失的 handleCreateBot 函数 +++
 async function handleCreateBot() {
   const { username, bot_type, initial_funds, action_probability } = forms.bots.create
   
   const payload = {
-    username: username || null, // 后端接受 null 或空字符串
+    username: username || null, 
     bot_type: bot_type,
     initial_funds: initial_funds,
     action_probability: action_probability
@@ -283,20 +270,21 @@ async function handleCreateBot() {
   )
   
   if (success) {
-    // 清空表单
     forms.bots.create.username = ''
-    // 重新加载数据 (会刷新机器人列表和日志)
     await fetchData()
   }
 }
-// +++ 修复BUG 1 结束 +++
+// ... (所有其他 handle... 函数保持不变) ...
 
-
-// ... (handleApiCall, handleSetSetting, handleSingleIssue, handleMultiIssue, handleBurn, handleAdjustQuota, handleToggleUserStatus, handleResetPassword, handlePurgeUser, handleMintNft, handleNukeSystem remain the same) ...
-// ... (handleSaveBotGlobalSettings, handleCreateBot, openBotManager, closeBotManager, handleToggleBotStatus, handleSetBotProbability, handleIssueToBot, handleBurnFromBot, handlePurgeBot remain the same) ...
-
+// +++ 核心修改 3：更新 onMounted 逻辑 +++
 onMounted(() => {
-  isLoading.value = false;
+  if (adminSecret.value) {
+    // 如果 localStorage 中有密钥，自动加载数据
+    fetchData()
+  } else {
+    // 如果没有，则停在输入密码的界面
+    isLoading.value = false
+  }
 })
 </script>
 
@@ -504,7 +492,7 @@ onMounted(() => {
              <div class="form-group">
                 <label for="bot_username">机器人用户名 (留空则自动生成)</label>
                 <input id="bot_username" type="text" v-model="forms.bots.create.username" placeholder="例如: 行星收藏家 (留空可自动命名)" />
-                </div>
+             </div>
              <div class="form-group">
                 <label for="bot_type">机器人类型</label>
                 <select id="bot_type" v-model="forms.bots.create.bot_type">
