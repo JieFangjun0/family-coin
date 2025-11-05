@@ -53,7 +53,7 @@ function completeSetup() {
 <template>
   <main class="setup-container">
     <div v-if="step === 'form'" class="form-wrapper">
-      <h1>🚀 FamilyCoin - 首次系统设置</h1>
+      <h1>JCoin - 首次系统设置</h1>
       <p class="subtitle">创建第一个管理员（创世）用户。</p>
       <form @submit.prevent="handleGenesisRegister" class="setup-form">
         <div class="form-group">

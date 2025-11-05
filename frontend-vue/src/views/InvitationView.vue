@@ -4,7 +4,8 @@ import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
 import BalanceCard from '@/components/wallet/BalanceCard.vue'
-import { formatTimestamp } from '@/utils/formatters'
+// +++ 1. 导入 formatCurrency +++
+import { formatTimestamp, formatCurrency } from '@/utils/formatters'
 
 const authStore = useAuthStore()
 
@@ -15,18 +16,25 @@ const isLoading = ref(true)
 const isGenerating = ref(false)
 const errorMessage = ref(null)
 const successMessage = ref(null)
-const copiedCode = ref(null) // 新增：用于跟踪哪个邀请码被复制了
+const copiedCode = ref(null)
+
+// +++ 2. 新增奖励状态 (默认值为0，等待API加载) +++
+const inviterBonus = ref(0)
+const welcomeBonus = ref(0)
 
 // --- Data Fetching ---
 async function fetchData() {
   isLoading.value = true
   errorMessage.value = null
 
-  const [detailsResult, codesResult] = await Promise.all([
+  // +++ 3. 并行获取所有数据，包括新的奖励设置 +++
+  const [detailsResult, codesResult, settingsResult] = await Promise.all([
     apiCall('GET', '/user/details', { params: { public_key: authStore.userInfo.publicKey } }),
-    apiCall('GET', '/user/my_invitations', { params: { public_key: authStore.userInfo.publicKey } })
+    apiCall('GET', '/user/my_invitations', { params: { public_key: authStore.userInfo.publicKey } }),
+    apiCall('GET', '/settings/public') // <-- 调用新接口
   ]);
 
+  // (处理用户详情)
   const [detailsData, detailsError] = detailsResult;
   if (detailsError) {
     errorMessage.value = `无法获取用户详情: ${detailsError}`;
@@ -34,12 +42,26 @@ async function fetchData() {
     userDetails.value = detailsData;
   }
 
+  // (处理邀请码)
   const [codesData, codesError] = codesResult;
   if (codesError) {
     errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + `无法获取邀请码列表: ${codesError}`;
   } else {
     myCodes.value = codesData?.codes ?? [];
   }
+
+  // +++ 4. 处理从API获取的奖励设置 +++
+  const [settingsData, settingsError] = settingsResult;
+  if (settingsError) {
+    errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + `无法加载奖励信息: ${settingsError}`;
+    // 即使失败也设置为 0，避免UI出错
+    inviterBonus.value = 0;
+    welcomeBonus.value = 0;
+  } else {
+    inviterBonus.value = settingsData?.inviter_bonus_amount ?? 0;
+    welcomeBonus.value = settingsData?.welcome_bonus_amount ?? 0;
+  }
+  // +++ 修改结束 +++
 
   isLoading.value = false;
 }
@@ -68,23 +90,21 @@ async function handleGenerateCode() {
     errorMessage.value = `生成失败: ${error}`;
   } else {
     successMessage.value = `成功生成新的邀请码: ${data.code}`;
-    await fetchData();
+    await fetchData(); // 重新加载数据（包括配额）
   }
 
   isGenerating.value = false;
 }
 
-// --- 新增：复制到剪贴板的方法 ---
 async function copyToClipboard(text) {
   try {
     await navigator.clipboard.writeText(text);
-    copiedCode.value = text; // 记录哪个码被复制了，用于UI反馈
+    copiedCode.value = text; 
     setTimeout(() => {
-      copiedCode.value = null; // 2秒后重置状态
+      copiedCode.value = null; 
     }, 2000);
   } catch (err) {
     console.error('复制失败: ', err);
-    // 可以在这里添加一个错误提示
   }
 }
 
@@ -96,7 +116,7 @@ onMounted(fetchData);
   <div class="invitation-view">
     <header class="view-header">
       <h1>邀请新成员</h1>
-      <p class="subtitle">邀请你的家人和朋友加入 FamilyCoin。</p>
+      <p class="subtitle">邀请你的朋友加入 JCoin，你们都将获得丰厚奖励！</p>
     </header>
 
     <div v-if="isLoading" class="loading-state">
@@ -109,16 +129,31 @@ onMounted(fetchData);
     </div>
 
     <div v-if="!isLoading && !errorMessage" class="invitation-content">
-      <div class="stats-grid">
-        <BalanceCard v-if="userDetails" label="剩余邀请次数" :value="userDetails.invitation_quota" />
-        <div class="generate-card">
-          <p>每次生成将消耗 1 次邀请次数。</p>
-          <button @click="handleGenerateCode" :disabled="isGenerating || !userDetails || userDetails.invitation_quota <= 0">
-            {{ isGenerating ? '生成中...' : '生成新邀请码' }}
-          </button>
-        </div>
+      
+      <div class="rewards-info">
+        <BalanceCard 
+          label="邀请人奖励 (你)" 
+          :value="formatCurrency(inviterBonus)" 
+          unit="JCoin" 
+        />
+        <BalanceCard 
+          label="新用户奖励 (对方)" 
+          :value="formatCurrency(welcomeBonus)" 
+          unit="JCoin" 
+        />
+        <BalanceCard 
+          v-if="userDetails" 
+          label="剩余邀请次数" 
+          :value="userDetails.invitation_quota" 
+        />
       </div>
-
+      
+      <div class="generate-card">
+        <p>每次生成将消耗 1 次邀请次数。</p>
+        <button @click="handleGenerateCode" :disabled="isGenerating || !userDetails || userDetails.invitation_quota <= 0">
+          {{ isGenerating ? '生成中...' : '生成新邀请码' }}
+        </button>
+      </div>
       <div v-if="successMessage" class="message success">{{ successMessage }}</div>
 
       <div class="codes-section">
@@ -182,9 +217,10 @@ onMounted(fetchData);
   gap: 2rem;
 }
 
-.stats-grid {
+/* +++ 7. 确保CSS样式支持3列网格 +++ */
+.rewards-info {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
   gap: 1.5rem;
 }
 
@@ -199,6 +235,7 @@ onMounted(fetchData);
   align-items: center;
   gap: 1rem;
 }
+/* +++ 修改结束 +++ */
 
 .generate-card p {
   margin: 0;

@@ -1,4 +1,4 @@
-// family-coin-vue-refactor/frontend-vue/src/stores/auth.js
+// jcoin-vue-refactor/frontend-vue/src/stores/auth.js
 
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
@@ -19,7 +19,7 @@ const usePersistentState = (key, defaultValue) => {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const userInfo = usePersistentState('family-coin-user', {
+  const userInfo = usePersistentState('jcoin-user', {
     publicKey: '',
     privateKey: '',
     username: '',
@@ -61,7 +61,7 @@ export const useAuthStore = defineStore('auth', () => {
       username: '',
       uid: '',
     }
-    localStorage.removeItem('family-coin-user')
+    localStorage.removeItem('jcoin-user')
     // 注意：这里不再有任何 router.push 的调用
   }
 

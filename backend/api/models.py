@@ -322,3 +322,10 @@ class NotificationEntry(BaseModel):
 class NotificationListResponse(BaseModel):
     notifications: List[NotificationEntry]
     unread_count: int
+    
+class PublicSettingsResponse(BaseModel):
+    """
+    用于返回公开的、非敏感的系统设置。
+    """
+    welcome_bonus_amount: float
+    inviter_bonus_amount: float

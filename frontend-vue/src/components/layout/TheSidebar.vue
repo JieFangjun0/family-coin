@@ -147,7 +147,7 @@ onUnmounted(() => {
 
   <aside class="sidebar" :class="{ 'is-open-mobile': isMobileSidebarOpen }">
     <div class="sidebar-header">
-      <h3>🪙 FamilyCoin</h3>
+      <h3><img src="/logo.png" class="sidebar-logo" alt="JCoin Logo" /> JCoin</h3>
     </div>
 
     <div class="user-info">
@@ -225,7 +225,18 @@ onUnmounted(() => {
   flex-shrink: 0;
   transition: transform 0.3s ease-in-out;
 }
+.sidebar-logo {
+  width: 24px;
+  height: 24px;
+  margin-right: 8px; /* 调整间距 */
+  vertical-align: middle; /* 确保图片和文字对齐 */
+}
 
+/* 确保 h3 样式能容纳图片 */
+.sidebar-header h3 {
+  display: flex;
+  align-items: center;
+}
 .sidebar-header h3 {
   color: #42b883;
   font-size: 1.5rem;

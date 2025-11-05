@@ -292,7 +292,7 @@ onMounted(() => {
   <div class="admin-view">
     <header class="view-header">
       <h1>管理员面板</h1>
-      <p class="subtitle">在这里管理 FamilyCoin 系统的方方面面。</p>
+      <p class="subtitle">在这里管理 JCoin 系统的方方面面。</p>
     </header>
 
     <div class="admin-secret-wrapper">

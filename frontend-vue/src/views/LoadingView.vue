@@ -1,7 +1,7 @@
 <template>
   <div class="loading-container">
     <div class="spinner"></div>
-    <p>正在连接至 FamilyCoin 后端...</p>
+    <p>正在连接至 JCoin 后端...</p>
   </div>
 </template>
 

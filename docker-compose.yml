@@ -2,7 +2,7 @@ services:
   # 1. 后端服务 (FastAPI)
   backend:
     build: .
-    container_name: familycoin-backend
+    container_name: jcoin-backend
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./data:/app/data
@@ -17,12 +17,12 @@ services:
     # +++ 修改结束 +++
 
     networks:
-      - familycoin-net
+      - jcoin-net
 
 # 2. 前端服务 (Vite 开发模式)
   frontend:
     image: node:24-alpine
-    container_name: familycoin-frontend-vue-dev
+    container_name: jcoin-frontend-vue-dev
     working_dir: /app
     # 【核心修正】将 "npm install" 替换为更可靠的 "npm ci"
     command: sh -c "npm ci && npm run dev"
@@ -32,10 +32,10 @@ services:
       - ./frontend-vue:/app
       - /app/node_modules
     networks:
-      - familycoin-net
+      - jcoin-net
     depends_on:
       - backend
 
 networks:
-  familycoin-net:
+  jcoin-net:
     driver: bridge

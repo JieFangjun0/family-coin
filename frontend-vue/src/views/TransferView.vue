@@ -121,7 +121,7 @@ onMounted(fetchData);
   <div class="transfer-view">
     <header class="view-header">
       <h1>转账</h1>
-      <p class="subtitle">向你的好友或其他用户发送 FamilyCoin。</p>
+      <p class="subtitle">向你的好友发送 JCoin。</p>
     </header>
 
     <div v-if="isLoading" class="loading-state">

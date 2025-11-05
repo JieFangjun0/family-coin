@@ -59,8 +59,20 @@ async function handleLogin() {
   </div>
 
   <main v-else class="login-container">
-    <h1>欢迎回来！</h1>
-    <p class="subtitle">登录 FamilyCoin 开始使用</p>
+    <h1><img src="/logo.png" class="login-logo" alt="JCoin Logo" /> 欢迎来到 JCoin！</h1>
+  <p class="subtitle">一个充满活力的微型虚拟经济世界。</p>
+
+  <div class="intro-text">
+    <p>在这里，你可以：</p>
+    <ul>
+      <li><strong>探索与铸造：</strong> 发现未知的“星球”，或封存一个“秘密”...</li>
+      <li><strong>交易与竞拍：</strong> 在活跃的市场中买卖、拍卖你的数字资产。</li>
+      <li><strong>收集与展示：</strong> 建立你的专属收藏，并在个人主页上向他人炫耀。</li>
+    </ul>
+  </div>
+  <p class="disclaimer">
+      JCoin 仅供娱乐。所有数字资产和“JCoin”均为虚拟道具，不具有任何真实世界价值。请理性参与。
+    </p>
     <form @submit.prevent="handleLogin" class="login-form">
       <div class="form-group">
         <label for="username">用户名或UID</label>
@@ -99,4 +111,52 @@ button:disabled { background-color: #ccc; cursor: not-allowed; }
 .message { margin-top: 1.5rem; padding: 1rem; border-radius: 4px; text-align: center; }
 .error { color: #d8000c; background-color: #ffbaba; }
 .footer-link { text-align: center; margin-top: 1.5rem; font-size: 0.9rem; color: #666; }
+.login-logo {
+  width: 32px;
+  height: 32px;
+  margin-right: 10px;
+  vertical-align: bottom;
+}
+.login-container h1 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+}
+.intro-text {
+  font-size: 0.95rem;
+  color: #4a5568;
+  background-color: #f7fafc;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  /* (修改) 减小与下方免责声明的间距 */
+  margin-bottom: 1.5rem; 
+}
+.intro-text p {
+  margin: 0 0 0.5rem 0;
+  font-weight: 500;
+  color: #2d3748;
+}
+.intro-text ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: 1.6;
+}
+.intro-text li {
+  margin-bottom: 0.25rem;
+}
+.subtitle {
+  margin-bottom: 1.5rem; 
+}
+
+/* (新增) 免责声明的专属样式 */
+.disclaimer {
+  font-size: 0.8rem; /* 更小的字体 */
+  color: #718096; /* 灰色，不显眼 */
+  text-align: center; /* 居中 */
+  margin-bottom: 2rem; /* 与下方登录框的间距 */
+  padding: 0 1rem; /* 左右留白 */
+  line-height: 1.4;
+}
 </style>
