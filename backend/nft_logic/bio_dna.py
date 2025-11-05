@@ -144,6 +144,7 @@ class BioDnaHandler(NFTLogicHandler):
             "species_rarity": species_rarity,
             "afk_resource": afk_resource,
             "generation": generation,
+            "discovered_by_username": owner_username,
             "nickname": species_name, # 默认昵称
             "gender": random.choice(["Male", "Female"]),
             "level": 1,
@@ -416,9 +417,13 @@ class BioDnaHandler(NFTLogicHandler):
                 ]
             
             # --- 3. 组装新灵宠 ---
-            new_pet_data = self._generate_pet_data(requester_key, nft['owner_username'], p1_data['species_rarity'], new_gen)
+            current_owner_username = nft['data'].get('discovered_by_username', '未知')
+            new_pet_data = self._generate_pet_data(requester_key, current_owner_username, p1_data['species_rarity'], new_gen)
             # 覆盖遗传数据
             new_pet_data.update({
+                "species_name": p1_data['species_name'],
+                "species_rarity": p1_data['species_rarity'],
+                "afk_resource": p1_data['afk_resource'],
                 "nickname": f"{p1_data['nickname'][:5]}-{p2_data['nickname'][:5]}的后代",
                 "generation": new_gen,
                 "stats": new_stats,
@@ -426,6 +431,8 @@ class BioDnaHandler(NFTLogicHandler):
                 "visible_traits": self._get_phenotype(new_genes),
                 "breeding_limit": new_limit,
             })
+            new_pet_data['economic_stats']['base_jph'] = p1_data['economic_stats']['base_jph']
+            
             # 重新计算JPH
             new_pet_data['economic_stats']['total_jph'] = new_pet_data['economic_stats']['base_jph'] + (new_stats["spirit"] / 100.0)
 

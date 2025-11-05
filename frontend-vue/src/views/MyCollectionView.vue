@@ -24,7 +24,7 @@ async function fetchNfts() {
   errorMessage.value = null
   // successMessage.value = null; // Don't clear success message on auto-refresh
 
-  // --- 修复问题 3: 并行获取NFTs和类型名称 ---
+  // --- 修复问题 3: 并行获取藏品s和类型名称 ---
   const [nftResult, typesResult] = await Promise.all([
     apiCall('GET', '/nfts/my', {
       params: { public_key: authStore.userInfo.publicKey }
@@ -41,7 +41,7 @@ async function fetchNfts() {
 
   const [typesData, typesError] = typesResult
   if (typesError) {
-    errorMessage.value = (errorMessage.value || '') + `\n无法加载NFT类型: ${typesError}`
+    errorMessage.value = (errorMessage.value || '') + `\n无法加载藏品类型: ${typesError}`
   } else {
     nftDisplayNames.value = typesData
   }
@@ -57,7 +57,7 @@ const filteredNfts = computed(() => {
     
     return nfts.value.filter(nft => {
         const data = nft.data || {}
-        // 1. NFT 元数据
+        // 1. 藏品 元数据
         let searchableText = nft.nft_type.toLowerCase() + ' ';
         searchableText += (nftDisplayNames.value[nft.nft_type] || '').toLowerCase() + ' ';
         searchableText += (nft.nft_id || '').substring(0, 8).toLowerCase() + ' ';
@@ -103,39 +103,64 @@ const sortedNftTypes = computed(() => {
 // --- 修复结束 ---
 
 
-// 通用NFT动作处理器
 async function handleNftAction(event) {
     const { action, nft, payload } = event;
     successMessage.value = null;
     errorMessage.value = null;
 
+    // 1. “上架”动作有单独的逻辑，因为它调用不同的 API
     if (action === 'list-for-sale') {
-        // *** 核心修改点 ***
-        // 此函数现在重命名为 handleCreateListing 以反映其新功能
+        // handleCreateListing 内部会调用 fetchNfts()，
+        // 这是正确的，因为 NFT 会离开“我的收藏”。
         await handleCreateListing(nft, payload);
+        return;
+    }
+
+    // 2. 处理所有其他动作 (rename, scan, harvest, train, breed, destroy)
+    const isDestructiveAction = (action === 'destroy');
+
+    const message = {
+        owner_key: authStore.userInfo.publicKey,
+        nft_id: nft.nft_id,
+        action: action,
+        action_data: payload,
+        timestamp: Math.floor(Date.now() / 1000)
+    };
+
+    const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
+    if (!signedPayload) {
+        errorMessage.value = '创建签名失败';
+        return;
+    }
+
+    // 调用通用的 /nfts/action 接口
+    const [data, error] = await apiCall('POST', '/nfts/action', { payload: signedPayload });
+
+    if (error) {
+        errorMessage.value = `操作失败: ${error}`;
     } else {
-        // Handle generic actions like rename, scan, destroy
-        const message = {
-            owner_key: authStore.userInfo.publicKey,
-            nft_id: nft.nft_id,
-            action: action,
-            action_data: payload,
-            timestamp: Math.floor(Date.now() / 1000)
-        };
-
-        const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
-        if (!signedPayload) {
-            errorMessage.value = '创建签名失败';
-            return;
-        }
-
-        const [data, error] = await apiCall('POST', '/nfts/action', { payload: signedPayload });
-
-        if (error) {
-            errorMessage.value = `操作失败: ${error}`;
+        successMessage.value = data.detail || '操作成功!';
+        if (isDestructiveAction) {
+            // 如果是销毁，我们从本地列表中移除它
+            nfts.value = nfts.value.filter(item => item.nft_id !== nft.nft_id);
         } else {
-            successMessage.value = data.detail || '操作成功!';
-            await fetchNfts(); // Refresh the list
+            // 如果是修改 (scan, rename, harvest, train, breed)...
+            // 我们只获取这一个 NFT 的新数据来更新它
+            const [updatedNft, nftError] = await apiCall('GET', `/nfts/${nft.nft_id}`);
+            if (updatedNft) {
+                // 找到它在列表中的索引
+                const index = nfts.value.findIndex(item => item.nft_id === nft.nft_id);
+                if (index !== -1) {
+                    // 原地替换数据，这不会导致组件重建
+                    nfts.value[index] = updatedNft;
+                } else {
+                    // 如果找不到（理论上不该发生），则回退到完整刷新
+                    await fetchNfts();
+                }
+            } else {
+                // 如果获取单个 NFT 失败，也回退到完整刷新
+                await fetchNfts();
+            }
         }
     }
 }
@@ -192,8 +217,8 @@ onMounted(fetchNfts)
 <template>
   <div class="collection-view">
     <header class="view-header">
-      <h1>🖼️ 我的收藏</h1>
-      <p class="subtitle">你拥有的所有 NFT 都在这里。你可以与它们互动，或将它们上架出售。</p>
+      <h1>我的藏品</h1>
+      <p class="subtitle">你拥有的所有 藏品 都在这里。你可以与它们互动，或将它们上架出售。</p>
     </header>
 
     <div v-if="isLoading" class="loading-state">正在加载...</div>
@@ -201,14 +226,14 @@ onMounted(fetchNfts)
     <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
     
     <div class="search-bar">
-      <input type="text" v-model="searchTerm" placeholder="搜索 NFT 名称、描述、类型或 ID..." />
+      <input type="text" v-model="searchTerm" placeholder="搜索 藏品 名称、描述、类型或 ID..." />
     </div>
     <div v-if="!isLoading && nfts.length === 0" class="empty-state">
       你的收藏是空的。快去商店创造或购买一些吧！
     </div>
 
     <div v-if="!isLoading && filteredNfts.length === 0 && nfts.length > 0" class="empty-state">
-        没有找到与 “{{ searchTerm }}” 匹配的 NFT。
+        没有找到与 “{{ searchTerm }}” 匹配的 藏品。
     </div>
     <div v-if="!isLoading && filteredNfts.length > 0">
       <div class="tabs" v-if="sortedNftTypes.length > 1">
