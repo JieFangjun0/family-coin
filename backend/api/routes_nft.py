@@ -14,6 +14,7 @@ from backend.nft_logic import NFT_HANDLERS, get_handler
 # (V3 新增导入)
 from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, BURN_ACCOUNT, GENESIS_ACCOUNT
 from backend.nft_logic.planet import PLANET_ECONOMICS # 导入经济配置以获取扫描成本
+from backend.nft_logic.bio_dna import PET_ECONOMICS # <<< (1) 导入灵宠经济配置
 
 router = APIRouter()
 
@@ -58,28 +59,39 @@ def api_perform_nft_action(request: NFTActionRequest):
     if not is_valid:
         raise HTTPException(status_code=400, detail=reason)
 
-    # (V3 核心修改：将 'scan' 和 'harvest' 纳入事务处理)
-    if message.action == 'scan' or message.action == 'harvest':
+    # (V3 核心修改：将 'scan', 'harvest', 'train', 'breed' 纳入事务处理)
+    if message.action in ['scan', 'harvest', 'train', 'breed']: # <<< (2) 新增 'train', 'breed'
         
         with LEDGER_LOCK, get_db_connection() as conn:
             
-            # --- 1. 处理成本 (如果是 'scan') ---
+            # --- 1. 处理成本 (如果是 'scan' 或 'train') ---
+            cost = 0.0
+            note = ""
+            
             if message.action == 'scan':
-                # (V3 修改：从经济配置中读取扫描成本)
-                scan_cost = PLANET_ECONOMICS.get('SCAN_COST', 5.0) 
-                current_balance = queries_user.get_balance(message.owner_key) # (V3: 在锁外获取余额)
-                if current_balance < scan_cost:
-                    raise HTTPException(status_code=400, detail=f"余额不足以支付 {scan_cost} FC 的扫描费用")
+                cost = PLANET_ECONOMICS.get('SCAN_COST', 10.0) 
+                note = f"NFT 扫描: {nft['nft_id'][:8]}"
+            
+            elif message.action == 'train': # <<< (3) 新增 'train' 成本逻辑
+                level = nft['data'].get('level', 1)
+                cost = PET_ECONOMICS.get('TRAIN_COST_PER_LEVEL', 5.0) * level
+                note = f"灵宠训练: {nft['nft_id'][:8]}"
+            
+            if cost > 0:
+                current_balance = queries_user.get_balance(message.owner_key) 
+                if current_balance < cost:
+                    raise HTTPException(status_code=400, detail=f"余额不足以支付 {cost} FC 的{message.action}费用")
                 
                 success_pay, detail_pay = _create_system_transaction(
-                    message.owner_key, BURN_ACCOUNT, scan_cost, f"NFT 扫描: {nft['nft_id'][:8]}", conn
+                    message.owner_key, BURN_ACCOUNT, cost, note, conn
                 )
                 if not success_pay:
                     conn.rollback()
                     raise HTTPException(status_code=500, detail=f"支付失败: {detail_pay}")
 
-            # --- 2. 执行动作 (scan 或 harvest) ---
-            success, detail, updated_data = handler.perform_action(nft, message.action, message.action_data, message.owner_key)
+            # --- 2. 执行动作 (scan, harvest, train, breed) ---
+            # <<< (4) 传递 conn 到 perform_action >>>
+            success, detail, updated_data = handler.perform_action(nft, message.action, message.action_data, message.owner_key, conn=conn)
             if not success:
                 conn.rollback()
                 raise HTTPException(status_code=500, detail=detail)
@@ -89,7 +101,7 @@ def api_perform_nft_action(request: NFTActionRequest):
                 jcoin_produced = updated_data.pop('__jcoin_produced__', 0.0)
                 if jcoin_produced > 0:
                     success_grant, detail_grant = _create_system_transaction(
-                        GENESIS_ACCOUNT, message.owner_key, jcoin_produced, f"行星丰收: {nft['nft_id'][:8]}", conn
+                        GENESIS_ACCOUNT, message.owner_key, jcoin_produced, f"NFT 丰收: {nft['nft_id'][:8]}", conn
                     )
                     if not success_grant:
                         conn.rollback()
@@ -119,7 +131,7 @@ def api_perform_nft_action(request: NFTActionRequest):
 
     else:
         # --- 处理不需要支付的动作 (例如 'rename', 'destroy') ---
-        success, detail, updated_data = handler.perform_action(nft, message.action, message.action_data, message.owner_key)
+        success, detail, updated_data = handler.perform_action(nft, message.action, message.action_data, message.owner_key, conn=None) # <<< (5) 传递 conn=None
         if not success:
             raise HTTPException(status_code=500, detail=detail)
 

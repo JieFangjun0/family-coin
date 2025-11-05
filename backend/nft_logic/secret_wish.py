@@ -59,7 +59,7 @@ class SecretWishHandler(NFTLogicHandler):
         return super().validate_action(nft, action, action_data, requester_key)
         
 
-    def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str, dict):
+    def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str, conn=None) -> (bool, str, dict): # <<< (1) 新增 conn=None
         """
         执行销毁操作。
         """
@@ -73,7 +73,7 @@ class SecretWishHandler(NFTLogicHandler):
             
             return True, "这个愿望已经彻底消失了。", updated_data
 
-        return super().perform_action(nft, action, action_data, requester_key)
+        return super().perform_action(nft, action, action_data, requester_key, conn) # <<< (2) 传递 conn
     
     @classmethod
     def get_shop_config(cls) -> dict:

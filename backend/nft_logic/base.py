@@ -46,13 +46,14 @@ class NFTLogicHandler(ABC):
         return False, f"不支持的动作: {action}"
 
     @abstractmethod
-    def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str, dict):
+    def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str, conn=None) -> (bool, str, dict): # <<< (1) 新增 conn=None
         """
         执行一个已验证合法的操作，并返回更新后的 NFT data。
         :param nft: 从数据库中获取的完整 NFT 对象。
         :param action: 动作名称。
         :param action_data: 伴随该动作的数据。
         :param requester_key: 发起请求的用户的公钥。
+        :param conn: (可选) 数据库连接对象，用于事务。
         :return: (是否成功, 消息, 更新后的 data 字典)。
         """
         # --- 新增：通用销毁操作执行 ---

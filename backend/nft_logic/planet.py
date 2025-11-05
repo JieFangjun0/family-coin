@@ -414,7 +414,7 @@ class PlanetHandler(NFTLogicHandler):
 
         return super().validate_action(nft, action, action_data, requester_key)
 
-    def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str) -> (bool, str, dict):
+    def perform_action(self, nft: dict, action: str, action_data: dict, requester_key: str, conn=None) -> (bool, str, dict): # <<< (1) 新增 conn=None
         updated_data = nft['data'].copy()
 
         if action == 'rename':
@@ -488,7 +488,7 @@ class PlanetHandler(NFTLogicHandler):
             
             return True, f"丰收成功！你从星球收集了 {jcoin_produced:.4f} JCoin。", updated_data
 
-        return super().perform_action(nft, action, action_data, requester_key)
+        return super().perform_action(nft, action, action_data, requester_key, conn) # <<< (2) 传递 conn
 
     @classmethod
     def get_shop_config(cls) -> dict:

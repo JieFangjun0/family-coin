@@ -7,6 +7,7 @@ from .base import NFTLogicHandler
 # <<< 核心修改: 导入新的“秘密愿望”处理器 >>>
 from .secret_wish import SecretWishHandler
 from .planet import PlanetHandler
+from .bio_dna import BioDnaHandler # <<< (1) 新增导入
 
 # <<< NFT 架构升级: 插件注册表 >>>
 # 每当创建一个新的 NFT 逻辑处理器，都需要在这里注册。
@@ -18,8 +19,7 @@ NFT_HANDLERS = {
     # <<< 核心修改: 注册新的处理器 >>>
     "SECRET_WISH": SecretWishHandler,
     "PLANET": PlanetHandler,
-    # 当你创建 bio_dna.py后，在这里添加:
-    # "BIO_DNA": BioDNAHandler,
+    "BIO_DNA": BioDnaHandler, # <<< (2) 新增注册
 }
 
 def get_handler(nft_type: str) -> NFTLogicHandler:
