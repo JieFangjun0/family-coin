@@ -501,7 +501,9 @@ class PlanetHandler(NFTLogicHandler):
             "name": "探索星空",
             "action_type": "probabilistic_mint", # 触发 execute_shop_action
             "action_label": f"支付 {cost} FC 并发射探测器",
-            "description": f"花费 {cost} FC 向未知深空发射一枚恒星探测器。它有 {prob*100:.0f}% 的概率为你发现一颗拥有独特坐标和未知潜力的行星！",
+            # +++ 核心修改: 替换这里的描述 +++
+            "description": f"踏入未知的星云，你将花费 {cost} FC 启动一枚高精度恒星探测器。这是一场高风险的宇宙赌博：它有 {prob*100:.0f}% 的概率为你发现一颗拥有独特坐标和未知潜力的行星！",
+            # +++ 修改结束 +++
             "fields": []
         }
         

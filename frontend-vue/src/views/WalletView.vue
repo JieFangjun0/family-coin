@@ -70,7 +70,7 @@ onMounted(() => {
 
     <div v-if="!isLoading && !errorMessage" class="wallet-content">
       <div class="stats-grid">
-        <BalanceCard label="当前余额" :value="formatCurrency(balance)" unit="FC" />
+        <BalanceCard label="当前余额" :value="formatCurrency(balance)" unit="JCoin" />
         <BalanceCard v-if="userDetails" label="总交易次数" :value="userDetails.tx_count" />
         
         <BalanceCard v-if="userDetails" label="邀请人">
@@ -95,7 +95,7 @@ onMounted(() => {
                 <th>时间</th>
                 <th>方向</th>
                 <th>对方</th>
-                <th class="amount">金额 (FC)</th>
+                <th class="amount">金额 (JCoin)</th>
                 <th>备注</th>
               </tr>
             </thead>

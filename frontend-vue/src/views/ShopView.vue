@@ -96,7 +96,7 @@ const groupListingsByType = (listings) => {
   return groups
 }
 
-// --- 铸造工坊 (Creatable) ---
+// --- 藏品创造 (Creatable) ---
 const creatableNftsByType = computed(() => {
   // creatableNfts 已经是按类型分组的对象，但值是 config，我们将其转为数组
   const groups = {}
@@ -209,7 +209,7 @@ async function fetchCreatableNfts() {
   activeMintTab.value = null // 重置tab
   const [data, error] = await apiCall('GET', '/market/creatable_nfts')
   if (error) {
-    errorMessage.value = `无法加载可铸造物品: ${error}`
+    errorMessage.value = `无法加载可创造藏品: ${error}`
   } else {
     creatableNfts.value = data
     for (const nftType in data) {
@@ -344,7 +344,7 @@ async function handleMintNft(nftType, config) {
   successMessage.value = null
   errorMessage.value = null
   if (balance.value < config.cost) {
-    errorMessage.value = "你的余额不足以支付铸造成本"
+    errorMessage.value = "你的余额不足以支付创造成本"
     return
   }
   const message = {
@@ -422,7 +422,7 @@ async function handlePlaceBid(item) {
   const minBid = parseFloat(((item.highest_bid || item.price) + 0.01).toFixed(2))
 
   if (!bidAmount || bidAmount < minBid) {
-    errorMessage.value = `出价必须至少为 ${formatCurrency(minBid)} FC`
+    errorMessage.value = `出价必须至少为 ${formatCurrency(minBid)} JCoin`
     return
   }
   if (balance.value < bidAmount) {
@@ -591,15 +591,15 @@ onMounted(() => {
   <div class="shop-view">
     <header class="view-header">
       <h1>🛒 商店 & 市场</h1>
-      <p class="subtitle">在这里铸造新的 NFT 或与其他成员进行交易。</p>
+      <p class="subtitle">在这里创造新的藏品或与其他成员进行交易。</p>
     </header>
 
     <div class="balance-display">
-      <BalanceCard label="当前余额" :value="isLoading.balance ? '加载中...' : formatCurrency(balance)" unit="FC" />
+      <BalanceCard label="当前余额" :value="isLoading.balance ? '加载中...' : formatCurrency(balance)" unit="JCoin" />
     </div>
 
     <div class="tabs">
-      <button :class="{ active: activeTab === 'mint' }" @click="selectTab('mint')">铸造工坊</button>
+      <button :class="{ active: activeTab === 'mint' }" @click="selectTab('mint')">藏品创造</button>
       <button :class="{ active: activeTab === 'buy' }" @click="selectTab('buy')">一口价</button>
       <button :class="{ active: activeTab === 'auction' }" @click="selectTab('auction')">拍卖行</button>
       <button :class="{ active: activeTab === 'seek' }" @click="selectTab('seek')">求购</button>
@@ -619,9 +619,9 @@ onMounted(() => {
     <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
 
     <div v-if="activeTab === 'mint'" class="tab-content">
-      <div v-if="isLoading.mint" class="loading-state">正在加载铸造工坊...</div>
+      <div v-if="isLoading.mint" class="loading-state">正在加载藏品创造界面...</div>
       <div v-else-if="!sortedCreatableTypes || sortedCreatableTypes.length === 0" class="empty-state">
-        当前没有可通过商店铸造的NFT类型。
+        当前没有可通过商店创造的NFT类型。
       </div>
       <div v-else>
         <div class="tabs sub-tabs" v-if="sortedCreatableTypes.length > 1">
@@ -640,7 +640,7 @@ onMounted(() => {
             <div v-for="config in creatableNftsByType[nftType]" :key="nftType" class="nft-card">
               <div class="nft-header">
                 <span class="nft-type">{{ allNftTypes[nftType] || nftType }}</span>
-                <span class="nft-price">{{ formatCurrency(config.cost) }} FC</span>
+                <span class="nft-price">{{ formatCurrency(config.cost) }} JCoin</span>
               </div>
               <h3 class="nft-name">{{ config.name }}</h3>
               <p class="nft-description">{{ config.description }}</p>
@@ -679,7 +679,7 @@ onMounted(() => {
                   </div>
                 </template>
                 <button type="submit" :disabled="balance < config.cost">
-                  {{ balance < config.cost ? '余额不足' : (config.action_label || '支付并铸造') }}
+                  {{ balance < config.cost ? '余额不足' : (config.action_label || '支付并创造') }}
                 </button>
               </form>
             </div>
@@ -710,7 +710,7 @@ onMounted(() => {
             <div v-for="item in saleListingsByType[nftType]" :key="item.listing_id" class="nft-card buy-card">
               <div class="nft-header">
                 <span class="nft-type">{{ allNftTypes[item.nft_type] || item.nft_type }}</span>
-                <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
+                <span class="nft-price">{{ formatCurrency(item.price) }} JCoin</span>
               </div>
               <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
               
@@ -759,7 +759,7 @@ onMounted(() => {
             <div v-for="item in auctionListingsByType[nftType]" :key="item.listing_id" class="nft-card auction-card">
               <div class="nft-header">
                 <span class="nft-type-auction">拍卖: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
-                <span class="nft-price">{{ item.highest_bid > 0 ? '当前' : '起拍' }}: {{ formatCurrency(item.highest_bid || item.price) }} FC</span>
+                <span class="nft-price">{{ item.highest_bid > 0 ? '当前' : '起拍' }}: {{ formatCurrency(item.highest_bid || item.price) }} JCoin</span>
               </div>
               <h3 class="nft-name">{{ item.trade_description || item.description }}</h3>
               
@@ -774,7 +774,7 @@ onMounted(() => {
                 </li>
                 <li><strong>结束于:</strong> <span class="countdown">{{ formatTimestamp(item.end_time) }}</span></li>
                 <li v-if="item.highest_bidder">
-                  <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} FC
+                  <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} JCoin
                   <button class="link-button" @click.prevent="fetchBidHistory(item.listing_id)">
                     ({{ auctionBidHistory[item.listing_id]?.show ? '隐藏' : '查看' }}历史)
                   </button>
@@ -788,7 +788,7 @@ onMounted(() => {
                   <li v-for="(bid, index) in auctionBidHistory[item.listing_id].bids" :key="index">
                     <div class="offer-info">
                       <ClickableUsername :uid="bid.bidder_uid" :username="bid.bidder_username" />
-                      <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} FC</strong></span>
+                      <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} JCoin</strong></span>
                       <span class="bid-time">@ {{ formatTimestamp(bid.created_at) }}</span>
                     </div>
                   </li>
@@ -833,7 +833,7 @@ onMounted(() => {
             <input type="text" v-model="seekForm.description" required placeholder="例如：求一个金色的宠物" />
           </div>
           <div class="form-group">
-            <label>我的预算 (FC)</label>
+            <label>我的预算 (JCoin)</label>
             <input type="number" v-model.number="seekForm.price" min="0.01" step="0.01" required />
           </div>
           <button type="submit" :disabled="balance < seekForm.price">
@@ -864,7 +864,7 @@ onMounted(() => {
             <div v-for="item in seekListingsByType[nftType]" :key="item.listing_id" class="nft-card seek-card">
               <div class="nft-header">
                 <span class="nft-type-seek">求购: {{ allNftTypes[item.nft_type] || item.nft_type }}</span>
-                <span class="nft-price">预算: {{ formatCurrency(item.price) }} FC</span>
+                <span class="nft-price">预算: {{ formatCurrency(item.price) }} JCoin</span>
               </div>
               <h3 class="nft-name">“{{ item.description }}”</h3>
 
@@ -924,7 +924,7 @@ onMounted(() => {
                 <div v-for="item in sortedMyListings" :key="item.listing_id" class="nft-card my-listing-card" :class="`status-${item.status.toLowerCase()}`">
                     <div class="nft-header">
                         <span :class="['nft-type-listing', `type-${item.listing_type.toLowerCase()}`]">{{ translateListingType(item.listing_type) }}</span>
-                        <span class="nft-price">{{ formatCurrency(item.price) }} FC</span>
+                        <span class="nft-price">{{ formatCurrency(item.price) }} JCoin</span>
                     </div>
                     <h3 class="nft-name">{{ item.description }}</h3>
                     <ul class="nft-data">
@@ -932,7 +932,7 @@ onMounted(() => {
                         <li><strong>状态:</strong> <span class="status-text">{{ translateStatus(item.status) }}</span></li>
                         <li><strong>上架于:</strong> {{ formatTimestamp(item.created_at) }}</li>
                         <li v-if="item.listing_type === 'AUCTION' && item.highest_bidder">
-                            <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} FC
+                            <strong>最高出价:</strong> {{ formatCurrency(item.highest_bid) }} JCoin
                             <button class="link-button" @click.prevent="fetchBidHistory(item.listing_id)">
                                 ({{ auctionBidHistory[item.listing_id]?.show ? '隐藏' : '查看' }}历史)
                             </button>
@@ -945,7 +945,7 @@ onMounted(() => {
                         <li v-for="(bid, index) in auctionBidHistory[item.listing_id].bids" :key="index">
                           <div class="offer-info">
                             <ClickableUsername :uid="bid.bidder_uid" :username="bid.bidder_username" />
-                            <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} FC</strong></span>
+                            <span>出价: <strong>{{ formatCurrency(bid.bid_amount) }} JCoin</strong></span>
                             <span class="bid-time">@ {{ formatTimestamp(bid.created_at) }}</span>
                           </div>
                         </li>

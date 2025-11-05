@@ -30,7 +30,7 @@ const summaryHtml = computed(() => {
   <template v-else>
     <div class="nft-header">
         <span class="nft-type-unknown">{{ nft.nft_type }}</span>
-        <h3 class="nft-name">未知类型的 NFT</h3>
+        <h3 class="nft-name">未知类型的 藏品</h3>
     </div>
     <div class="nft-data">
         <p>没有找到该类型的专属渲染器。以下是它的原始数据：</p>

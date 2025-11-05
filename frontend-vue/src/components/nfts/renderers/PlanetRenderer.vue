@@ -29,6 +29,62 @@ const ANOMALY_NAMES = {
     "RHYTHMIC_PULSE": "有节律的电磁脉冲"
 }
 
+// +++ 核心修复：添加特质中文映射 +++
+const TRAIT_NAMES = {
+    "RES_ZERO_POINT": "零点能量场",
+    "RES_HEAVY_MINERAL": "超重力矿脉",
+    "RES_DIAMOND_RAIN": "钻石雨",
+    "RES_HELIUM_3": "氦-3富集",
+    "RES_SPICE": "异星香料",
+    "RES_ANTIMATTER": "反物质喷泉",
+    "RES_ADAMANTIUM": "艾德曼合金矿",
+    "RES_CRYONIUM": "氪冰矿",
+    "LIFE_SILICON": "硅基生命痕迹",
+    "LIFE_SENTIENT_PLANT": "感知植物群",
+    "LIFE_GAS_WHALE": "气态巨兽",
+    "LIFE_EXTREMEPHILE": "极端微生物",
+    "LIFE_PARADISE": "生物天堂",
+    "LIFE_KRAKEN": "深海巨妖",
+    "ART_ANCIENT_RUINS": "远古外星遗物",
+    "ART_SLEEPING_SHIP": "休眠的星际飞船",
+    "ART_UNSTABLE_PORTAL": "不稳定的传送门",
+    "ART_FORERUNNER_MAP": "先行者星图",
+    "ART_WORLD_ENGINE": "世界引擎",
+    "ART_DYSON_SPHERE_FRAG": "戴森球残片",
+    "ART_ORACLE": "神谕AI",
+    "WON_ETERNAL_STORM": "永恒风暴",
+    "WON_NATURAL_PULSAR": "天然脉冲星",
+    "WON_SKY_MIRROR": "天空之镜",
+    "WON_FLOATING_ISLES": "悬浮岛屿",
+    "WON_CRYSTAL_FOREST": "水晶森林",
+    "WON_TIME_ANOMALY": "时间泡",
+    "WON_GRAVITY_RIFT": "重力裂隙",
+    "DUD_HIGH_RADIATION": "高强度辐射",
+    "DUD_UNSTABLE_CRUST": "不稳定地壳",
+    "DUD_TOXIC_ATMOS": "剧毒大气",
+    "DUD_ROGUE_ASTEROIDS": "流氓小行星带",
+    "DUD_ANCIENT_PLAGUE": "远古瘟疫",
+    "DUD_VOID_ORGANISM": "虚空生物",
+    "DUD_LOST_COLONY": "失落的殖民地",
+    "DUD_NOTHING": "一无所获",
+    "RES_WATER_ICE": "丰富的水冰",
+    "RES_THOLINS": "泰坦有机S",
+    "LIFE_FUNGAL_WASTES": "真菌荒原",
+    "WON_AURORA": "强极光",
+    "WON_GIANT_VOLCANO": "超级火山",
+    "ART_CRASH_SITE": "飞船坠毁点",
+    "DUD_BARREN": "贫瘠之地",
+    "DUD_FALSE_ALARM": "虚假警报",
+    "RES_SILICATES": "硅酸盐岩石",
+    "WON_DEEP_CANYON": "大裂谷",
+    "LIFE_BACTERIA": "细菌菌落",
+    "ART_SATELLITE": "失控的人造卫星",
+    "DUD_MAGNETIC_FIELD": "异常磁场",
+    "RES_METHANE_LAKE": "甲烷湖",
+}
+// +++ 修复结束 +++
+
+
 // --- V3: 经济配置 (硬编码以匹配后端) ---
 const HARVEST_COOLDOWN_SECONDS = 4 * 3600;
 const SCAN_COST = 10.0;
@@ -66,6 +122,15 @@ onUnmounted(() => {
 const nftData = computed(() => props.nft.data || {})
 const economic_stats = computed(() => nftData.value.economic_stats || {})
 const rarity_score = computed(() => nftData.value.rarity_score || {})
+
+// +++ 核心修复：计算属性，用于翻译特质列表 +++
+const unlockedTraitNames = computed(() => {
+  if (!nftData.value.unlocked_traits?.length) {
+    return []
+  }
+  return nftData.value.unlocked_traits.map(traitId => TRAIT_NAMES[traitId] || traitId)
+})
+// +++ 修复结束 +++
 
 const jph = computed(() => economic_stats.value.total_jph || 0)
 const last_harvest_time = computed(() => nftData.value.last_harvest_time || 0)
@@ -159,7 +224,7 @@ const summaryHtml = computed(() => {
             </span>
           </li>
           
-          <li v-if="nftData.unlocked_traits?.length"><strong>已揭示特质:</strong> {{ nftData.unlocked_traits.join(', ') }}</li>
+          <li v-if="unlockedTraitNames.length > 0"><strong>已揭示特质:</strong> {{ unlockedTraitNames.join(', ') }}</li>
           <li v-if="nftData.anomalies?.length" class="anomaly"><strong>未探明信号:</strong> {{ nftData.anomalies.length }} 个</li>
       </ul>
       <div v-else class="nft-data-error">[数据加载失败]</div>

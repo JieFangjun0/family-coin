@@ -134,7 +134,7 @@ onMounted(fetchData);
     </div>
 
     <div v-if="!isLoading" class="transfer-content">
-      <BalanceCard label="可用余额" :value="formatCurrency(balance)" unit="FC" />
+      <BalanceCard label="可用余额" :value="formatCurrency(balance)" unit="JCoin" />
 
       <form @submit.prevent="handleTransfer" class="transfer-form">
         <h2>交易详情</h2>
@@ -151,7 +151,7 @@ onMounted(fetchData);
         </div>
 
         <div class="form-group">
-          <label for="amount">金额 (FC)</label>
+          <label for="amount">金额 (JCoin)</label>
           <input id="amount" type="number" v-model.number="form.amount" min="0.01" :max="balance" step="0.01" required />
         </div>
 

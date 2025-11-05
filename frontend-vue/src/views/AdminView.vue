@@ -684,7 +684,7 @@ onMounted(() => {
               <tr>
                 <th>用户名</th>
                 <th>UID</th>
-                <th>余额 (FC)</th>
+                <th>余额 (JCoin)</th>
                 <th>邀请人</th>
                 <th>状态</th>
                 <th>操作</th>
@@ -860,7 +860,7 @@ onMounted(() => {
                 </select>
                 </div>
              <div class="form-group">
-                <label for="bot_funds">初始资金 (默认 {{ formatCurrency(botTypeConfigs[forms.bots.create.bot_type]?.initial_funds || 1000.0) }} FC)</label>
+                <label for="bot_funds">初始资金 (默认 {{ formatCurrency(botTypeConfigs[forms.bots.create.bot_type]?.initial_funds || 1000.0) }} JCoin)</label>
                 <input id="bot_funds" type="number" v-model.number="forms.bots.create.initial_funds" min="0" />
              </div>
              <div class="form-group">
@@ -879,7 +879,7 @@ onMounted(() => {
                 <th>用户名</th>
                 <th>UID</th>
                 <th>类型</th>
-                <th class="amount">余额 (FC)</th>
+                <th class="amount">余额 (JCoin)</th>
                 <th>概率</th>
                 <th>状态</th>
                 <th>操作</th>
@@ -1013,7 +1013,7 @@ onMounted(() => {
             <th>描述</th>
             <th>卖家</th>
             <th>买家</th>
-            <th class="amount">成交价 (FC)</th>
+            <th class="amount">成交价 (JCoin)</th>
             </tr>
         </thead>
         <tbody>
@@ -1054,7 +1054,7 @@ onMounted(() => {
         <form @submit.prevent="handleSetSetting('welcome_bonus_amount')" class="admin-form">
           <h2>新用户奖励</h2>
           <div class="form-group">
-            <label>注册奖励金额 (FC)</label>
+            <label>注册奖励金额 (JCoin)</label>
             <input type="number" v-model.number="forms.settings.welcome_bonus_amount" min="0" step="0.01"/>
           </div>
           <button type="submit">更新注册奖励</button>
@@ -1062,7 +1062,7 @@ onMounted(() => {
          <form @submit.prevent="handleSetSetting('inviter_bonus_amount')" class="admin-form">
           <h2>邀请人奖励</h2>
           <div class="form-group">
-            <label>成功邀请奖励 (FC)</label>
+            <label>成功邀请奖励 (JCoin)</label>
             <input type="number" v-model.number="forms.settings.inviter_bonus_amount" min="0" step="0.01"/>
           </div>
           <button type="submit">更新邀请奖励</button>

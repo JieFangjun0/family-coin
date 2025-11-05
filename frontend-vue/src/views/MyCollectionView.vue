@@ -204,7 +204,7 @@ onMounted(fetchNfts)
       <input type="text" v-model="searchTerm" placeholder="搜索 NFT 名称、描述、类型或 ID..." />
     </div>
     <div v-if="!isLoading && nfts.length === 0" class="empty-state">
-      你的收藏是空的。快去商店铸造或购买一些吧！
+      你的收藏是空的。快去商店创造或购买一些吧！
     </div>
 
     <div v-if="!isLoading && filteredNfts.length === 0 && nfts.length > 0" class="empty-state">

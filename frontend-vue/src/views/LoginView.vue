@@ -65,7 +65,7 @@ async function handleLogin() {
   <div class="intro-text">
     <p>在这里，你可以：</p>
     <ul>
-      <li><strong>探索与铸造：</strong> 发现未知的“星球”，或封存一个“秘密”...</li>
+      <li><strong>探索与创造：</strong> 发现未知的“星球”，或封存一个“秘密”...</li>
       <li><strong>交易与竞拍：</strong> 在活跃的市场中买卖、拍卖你的数字资产。</li>
       <li><strong>收集与展示：</strong> 建立你的专属收藏，并在个人主页上向他人炫耀。</li>
     </ul>
