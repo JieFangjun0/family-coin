@@ -25,7 +25,8 @@ const botTypes = ref([])
 const showBotManager = ref(null) // 用于显示单个机器人的管理模态框
 const botLogs = ref([])
 const logFilterKey = ref('') // 用于日志过滤
-
+// 交易历史
+const marketTradeHistory = ref([])
 // --- 表单 ---
 const forms = reactive({
   issue: { to_key: '', amount: 1000, note: '管理员增发' },
@@ -57,7 +58,10 @@ const forms = reactive({
       burn_amount: 100,
       confirm_purge: ''
     }
-  }
+  },
+    market_history: { // +++ 新增 +++
+    limit:100,
+    }
 })
 
 // --- 计算属性 ---
@@ -102,7 +106,7 @@ async function fetchData() {
   errorMessage.value = null
   successMessage.value = null;
   
-  const [usersRes, balancesRes, nftTypesRes, botListRes, botTypesRes, botLogsRes] = await Promise.all([
+  const [usersRes, balancesRes, nftTypesRes, botListRes, botTypesRes, botLogsRes, marketHistoryRes] = await Promise.all([
     apiCall('GET', '/users/list', { params: { public_key: authStore.userInfo.publicKey } }),
     apiCall('GET', '/admin/balances', { headers: adminHeaders.value }),
     apiCall('GET', '/admin/nft/types', { headers: adminHeaders.value }),
@@ -111,7 +115,11 @@ async function fetchData() {
     apiCall('GET', '/admin/bots/logs', { 
       headers: adminHeaders.value,
       params: { public_key: logFilterKey.value || null, limit: 100 }
-    }) 
+    }),
+    apiCall('GET', '/admin/market/history', { // +++ 新增 +++
+        headers: adminHeaders.value,
+        params: { limit: forms.market_history.limit }
+    })
   ]);
 
   // 处理用户
@@ -154,6 +162,13 @@ async function fetchData() {
   } else {
     botLogs.value = botLogsRes[0].logs
   }
+
+  // +++ (新增) Process Market History +++
+  if (marketHistoryRes[1]) {
+      errorMessage.value = (errorMessage.value || '') + `\n加载市场日志失败: ${marketHistoryRes[1]}`
+  } else {
+      marketTradeHistory.value = marketHistoryRes[0].history
+  }
   
   // 获取设置 (包括机器人的)
   await fetchSettings(['default_invitation_quota', 'welcome_bonus_amount', 'inviter_bonus_amount', 'bot_system_enabled', 'bot_check_interval_seconds'])
@@ -188,7 +203,19 @@ async function fetchLogsOnly() {
     successMessage.value = "日志已刷新";
   }
 }
-
+// +++ (新增) 专门用于刷新市场日志的方法 +++
+async function fetchMarketHistoryOnly() {
+  const [data, error] = await apiCall('GET', '/admin/market/history', { 
+    headers: adminHeaders.value,
+    params: { limit: forms.market_history.limit }
+  });
+  if (error) {
+    errorMessage.value = `加载市场日志失败: ${error}`;
+  } else {
+    marketTradeHistory.value = data.history;
+    successMessage.value = "市场日志已刷新";
+  }
+}
 async function handleApiCall(method, endpoint, payload, successMsg, options = {}) {
   const { skipFetch = false } = options;
   successMessage.value = null
@@ -370,6 +397,7 @@ onMounted(() => {
       <div class="admin-tabs">
         <button :class="{ active: activeTab === 'user_management' }" @click="activeTab = 'user_management'">用户管理</button>
         <button :class="{ active: activeTab === 'bot_management' }" @click="activeTab = 'bot_management'">机器人管理</button>
+        <button :class="{ active: activeTab === 'market_history' }" @click="activeTab = 'market_history'">📈 市场日志</button>
         <button :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">系统设置</button>
       </div>
 
@@ -680,7 +708,54 @@ onMounted(() => {
         </form>
 
       </div>
+      <div v-if="activeTab === 'market_history'" class="tab-content">
+    <h2>📈 市场成交日志</h2>
+    <p class="subtitle">查看最近在市场上完成的交易（买卖、拍卖、求购）。</p>
 
+    <div class="log-filter-bar">
+        <div class="form-group">
+        <label for="market_history_limit">显示最近</label>
+        <select id="market_history_limit" v-model.number="forms.market_history.limit">
+            <option value="50">50 条</option>
+            <option value="100">100 条</option>
+            <option value="250">250 条</option>
+        </select>
+        </div>
+        <button @click="fetchMarketHistoryOnly">刷新日志</button>
+    </div>
+
+    <div class="table-wrapper">
+        <table>
+        <thead>
+            <tr>
+            <th>时间</th>
+            <th>类型</th>
+            <th>描述</th>
+            <th>卖家</th>
+            <th>买家</th>
+            <th class="amount">成交价 (FC)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr v-if="marketTradeHistory.length === 0">
+            <td colspan="6" style="text-align: center; padding: 2rem;">没有找到市场成交记录。</td>
+            </tr>
+            <tr v-for="trade in marketTradeHistory" :key="trade.trade_id">
+            <td class="timestamp">{{ formatTimestamp(trade.timestamp) }}</td>
+            <td>
+                <span :class="['action-tag', trade.trade_type.toLowerCase()]">
+                {{ trade.trade_type }}
+                </span>
+            </td>
+            <td class="log-message">{{ trade.listing_description || 'N/A' }}</td>
+            <td>{{ trade.seller_username || '未知' }}</td>
+            <td>{{ trade.buyer_username || '未知' }}</td>
+            <td class="amount">{{ formatCurrency(trade.price) }}</td>
+            </tr>
+        </tbody>
+        </table>
+    </div>
+    </div>
       <div v-if="activeTab === 'settings'" class="tab-content grid-2-col">
         <form @submit.prevent="handleSetSetting('default_invitation_quota')" class="admin-form">
           <h2>邀请系统设置</h2>
@@ -940,5 +1015,10 @@ td.log-message {
   padding-top: 1rem;
   border-top: 2px solid #e53e3e;
 }
-
+.action-type .action-tag.sale,
+.action-tag.sale { background-color: #c6f6d5; color: #2f855a; }
+.action-type .action-tag.auction,
+.action-tag.auction { background-color: #feebc8; color: #975a16; }
+.action-type .action-tag.seek,
+.action-tag.seek { background-color: #bee3f8; color: #2c5282; }
 </style>

@@ -195,6 +195,25 @@ def init_db():
         )
         ''')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_bids_listing_id ON auction_bids (listing_id)")
+        # +++ 新增：市场成交历史表 +++
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS market_trade_history (
+            trade_id TEXT PRIMARY KEY,
+            listing_id TEXT NOT NULL,
+            nft_id TEXT NOT NULL,
+            nft_type TEXT NOT NULL,
+            trade_type TEXT NOT NULL, -- 'SALE', 'AUCTION', 'SEEK'
+            seller_key TEXT NOT NULL,
+            buyer_key TEXT NOT NULL,
+            price REAL NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (listing_id) REFERENCES market_listings(listing_id),
+            FOREIGN KEY (seller_key) REFERENCES users(public_key),
+            FOREIGN KEY (buyer_key) REFERENCES users(public_key)
+        )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_timestamp ON market_trade_history (timestamp)")
+        # +++ 新增结束 +++
         # +++ 新增：机器人日志表 +++
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS bot_logs (
@@ -646,6 +665,17 @@ def execute_sale(buyer_key: str, listing_id: str) -> (bool, str):
 
             # 3. 更新挂单状态
             cursor.execute("UPDATE market_listings SET status = 'SOLD' WHERE listing_id = ?", (listing_id,))
+            # +++ 4. 记录交易日志 +++
+            _log_market_trade(
+                conn=conn,
+                listing_id=listing_id,
+                nft_id=nft_id,
+                nft_type=listing['nft_type'],
+                trade_type='SALE',
+                seller_key=seller_key,
+                buyer_key=buyer_key,
+                price=price
+            )
             conn.commit()
             return True, "购买成功！"
         except Exception as e:
@@ -727,6 +757,17 @@ def resolve_finished_auctions():
                 cursor.execute("UPDATE market_listings SET status = 'SOLD' WHERE listing_id = ?", (listing_id,))
             else:
                 success, detail = _change_nft_owner(auction['nft_id'], auction['lister_key'], conn)
+                # +++ 记录交易日志 +++
+                _log_market_trade(
+                    conn=conn,
+                    listing_id=listing_id,
+                    nft_id=nft_id,
+                    nft_type=auction['nft_type'],
+                    trade_type='AUCTION',
+                    seller_key=seller_key,
+                    buyer_key=winner_key,
+                    price=final_price
+                )
                 if not success: continue
 
                 cursor.execute("UPDATE market_listings SET status = 'EXPIRED' WHERE listing_id = ?", (listing_id,))
@@ -773,7 +814,7 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
         try:
             cursor = conn.cursor()
             query = """
-                SELECT o.*, l.lister_key, l.price, l.status as listing_status
+                SELECT o.*, l.lister_key, l.price, l.status as listing_status, l.nft_type
                 FROM market_offers o JOIN market_listings l ON o.listing_id = l.listing_id
                 WHERE o.offer_id = ? AND o.status = 'PENDING'
             """
@@ -808,7 +849,20 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             cursor.execute("UPDATE market_listings SET status = 'FULFILLED' WHERE listing_id = ?", (listing_id,))
             
             cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE listing_id = ? AND status = 'PENDING'", (listing_id,))
+            # 2. 在 conn.commit() 之前
+            cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE listing_id = ? AND status = 'PENDING'", (listing_id,))
             
+            # +++ 记录交易日志 +++
+            _log_market_trade(
+                conn=conn,
+                listing_id=listing_id,
+                nft_id=offered_nft_id,
+                nft_type=offer_details['nft_type'], # 现在这里有 nft_type 了
+                trade_type='SEEK',
+                seller_key=offerer_key, # 卖家 (提供NFT)
+                buyer_key=seeker_key,   # 买家 (提供FC, 获得NFT)
+                price=price
+            )
             conn.commit()
             return True, "交易成功！您已获得新的NFT。"
         except Exception as e:
@@ -1389,6 +1443,23 @@ def _execute_system_tx_logic(from_key, to_key, amount, note, conn):
     except Exception as e:
         return False, f"系统操作数据库失败: {e}"
 
+def _log_market_trade(conn, listing_id: str, nft_id: str, nft_type: str, trade_type: str, seller_key: str, buyer_key: str, price: float):
+    """(内部函数) 记录一笔成功的市场交易。"""
+    try:
+        cursor = conn.cursor()
+        trade_id = str(uuid.uuid4())
+        cursor.execute(
+            """
+            INSERT INTO market_trade_history
+            (trade_id, listing_id, nft_id, nft_type, trade_type, seller_key, buyer_key, price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (trade_id, listing_id, nft_id, nft_type, trade_type, seller_key, buyer_key, price)
+        )
+    except Exception as e:
+        # 记录交易日志失败不应导致整个交易回滚，但必须打印严重警告
+        print(f"!!!!!!!!!!!!!! 严重错误：无法将市场交易 {listing_id} 写入 market_trade_history !!!!!!!!!!!!!!")
+        print(f"错误: {e}")
 def _create_system_transaction(from_key: str, to_key: str, amount: float, note: str = None, conn=None) -> (bool, str):
     """(重构) 创建一笔系统交易 (铸币/销毁/托管)。"""
     def run_logic(connection):
@@ -1758,4 +1829,32 @@ def get_friend_requests(public_key: str) -> list:
             ORDER BY f.created_at DESC;
         """
         cursor.execute(query, {"pk": public_key})
+        return [dict(row) for row in cursor.fetchall()]
+    
+def admin_get_market_trade_history(limit: int = 100) -> List[dict]:
+    """(管理员功能) 获取最近的市场成交记录。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT
+                h.trade_id,
+                h.listing_id,
+                h.nft_id,
+                h.nft_type,
+                h.trade_type,
+                h.seller_key,
+                h.buyer_key,
+                h.price,
+                CAST(strftime('%s', h.timestamp) AS REAL) as timestamp,
+                seller.username as seller_username,
+                buyer.username as buyer_username,
+                l.description as listing_description
+            FROM market_trade_history h
+            LEFT JOIN users seller ON h.seller_key = seller.public_key
+            LEFT JOIN users buyer ON h.buyer_key = buyer.public_key
+            LEFT JOIN market_listings l ON h.listing_id = l.listing_id
+            ORDER BY h.timestamp DESC
+            LIMIT ?
+        """
+        cursor.execute(query, (limit,))
         return [dict(row) for row in cursor.fetchall()]

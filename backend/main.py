@@ -312,6 +312,24 @@ class BotLogEntry(BaseModel):
 class AdminBotLogResponse(BaseModel):
     logs: List[BotLogEntry]
 # +++ 新增结束 +++
+# +++ (新增) 市场历史 Pydantic 模型 +++
+class AdminMarketTradeHistoryEntry(BaseModel):
+    trade_id: str
+    listing_id: str
+    nft_id: str
+    nft_type: str
+    trade_type: str
+    seller_key: str
+    buyer_key: str
+    price: float
+    timestamp: float
+    seller_username: Optional[str] = None
+    buyer_username: Optional[str] = None
+    listing_description: Optional[str] = None
+
+class AdminMarketTradeHistoryResponse(BaseModel):
+    history: List[AdminMarketTradeHistoryEntry]
+# +++ 新增结束 +++
 # --- 管理员认证 ---
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "CHANGE_ME_IN_ENV")
 GENESIS_PASSWORD = os.getenv("GENESIS_PASSWORD", "CHANGE_ME_IN_ENV")
@@ -1084,6 +1102,15 @@ def api_admin_nuke_system():
     if not success:
         raise HTTPException(status_code=500, detail=detail)
     return SuccessResponse(detail=detail)
+# +++ (新增) 市场历史 API 终端 +++
+@app.get("/admin/market/history", response_model=AdminMarketTradeHistoryResponse, tags=["Admin"], dependencies=[Depends(verify_admin)])
+def api_admin_get_market_trade_history(limit: int = 100):
+    """
+    (新增) 获取最新的市场成交历史。
+    """
+    if limit > 500: limit = 500
+    history = ledger.admin_get_market_trade_history(limit=limit)
+    return AdminMarketTradeHistoryResponse(history=history)
 # --- 启动 (用于本地调试) ---
 if __name__ == "__main__":
     print("--- 警告：正在以调试模式启动 (非 Docker) ---")
