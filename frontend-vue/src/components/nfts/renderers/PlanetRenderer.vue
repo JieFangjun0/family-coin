@@ -1,33 +1,45 @@
 <script setup>
-// ... (导入和 props/emit 保持不变)
-import { reactive, computed } from 'vue'
+import { reactive, computed, ref, onUnmounted, onMounted } from 'vue'
+import { formatTimestamp, formatCurrency } from '@/utils/formatters'
 
 const props = defineProps({
   nft: { type: Object, required: true },
   context: { type: String, default: 'collection' },
-  // --- 新增 prop ---
   collapsed: { type: Boolean, default: false }
-  // --- 新增结束 ---
 })
 
 const emit = defineEmits(['action'])
 
-// +++ 修复请求 3：添加中文映射 +++
+// --- V3: 扩展的异常信号中文映射 ---
+// (我们从 planet.py 复制这个映射)
 const ANOMALY_NAMES = {
-  "GEO_ACTIVITY": "异常地质活动",
-  "HIGH_ENERGY": "高频能量读数",
-  "BIO_SIGN": "微弱的生命信号",
-  "RHYTHMIC_PULSE": "有节律的电磁脉冲"
+    "SIG_GEO_FLUX": "地质通量",
+    "SIG_WEAK_ENERGY": "微弱能量读数",
+    "SIG_FAINT_BIO": "模糊的生命信号",
+    "SIG_HIGH_ENERGY": "高频能量读数",
+    "SIG_COMPLEX_STRUCTURE": "复杂结构回波",
+    "SIG_DEEP_SCAN": "深层回音",
+    "SIG_OCEANIC_ANOMALY": "海洋异常",
+    "SIG_RHYTHMIC_PULSE": "有节律的电磁脉冲",
+    "SIG_PLANET_WIDE": "全球范围异常",
+    // 向下兼容旧的
+    "GEO_ACTIVITY": "异常地质活动",
+    "HIGH_ENERGY": "高频能量读数",
+    "BIO_SIGN": "微弱的生命信号",
+    "RHYTHMIC_PULSE": "有节律的电磁脉冲"
 }
-// +++ 修复结束 +++
 
-// ... (form, displayName, handle... 方法保持不变)
+// --- V3: 经济配置 (硬编码以匹配后端) ---
+const HARVEST_COOLDOWN_SECONDS = 4 * 3600;
+const SCAN_COST = 10.0;
+
+// --- 响应式表单 ---
 const form = reactive({
   list: {
     description: `行星: ${props.nft.data?.custom_name || `未命名行星 (${props.nft.nft_id?.substring(0, 6)})`}`,
     price: 50.0,
-    listing_type: 'SALE', // 新增
-    auction_hours: 24     // 新增
+    listing_type: 'SALE',
+    auction_hours: 24
   },
   rename: {
     newName: props.nft.data?.custom_name || ''
@@ -37,7 +49,44 @@ const form = reactive({
   }
 })
 
-const displayName = computed(() => props.nft.data?.custom_name || `未命名行星 (${props.nft.nft_id?.substring(0, 6)})`)
+// --- V3: 计时器和产出计算 ---
+const now = ref(Date.now() / 1000)
+let timer;
+
+onMounted(() => {
+  timer = setInterval(() => {
+    now.value = Date.now() / 1000
+  }, 1000)
+})
+
+onUnmounted(() => {
+  clearInterval(timer)
+})
+
+const nftData = computed(() => props.nft.data || {})
+const economic_stats = computed(() => nftData.value.economic_stats || {})
+const rarity_score = computed(() => nftData.value.rarity_score || {})
+
+const jph = computed(() => economic_stats.value.total_jph || 0)
+const last_harvest_time = computed(() => nftData.value.last_harvest_time || 0)
+const next_harvest_time = computed(() => last_harvest_time.value + HARVEST_COOLDOWN_SECONDS)
+const can_harvest = computed(() => jph.value > 0 && now.value > next_harvest_time.value)
+
+const harvest_cooldown_str = computed(() => {
+    if (jph.value <= 0) return '不可开采';
+    const timeLeftSeconds = Math.max(0, next_harvest_time.value - now.value);
+    if (timeLeftSeconds === 0) return '可以丰收';
+
+    const hours = Math.floor(timeLeftSeconds / 3600)
+    const minutes = Math.floor((timeLeftSeconds % 3600) / 60)
+    const seconds = Math.floor(timeLeftSeconds % 60)
+    
+    return `冷却中: ${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`
+})
+// --- V3 结束 ---
+
+
+const displayName = computed(() => nftData.value.custom_name || `未命名行星 (${props.nft.nft_id?.substring(0, 6)})`)
 
 function handleListForSale() {
   emit('action', 'list-for-sale', {
@@ -55,24 +104,32 @@ function handleRename() {
 }
 
 function handleScan() {
-    // 假设后端 /nfts/action 里的 'scan' 动作会自动处理 5 FC 的扣款
     emit('action', 'scan', {
         anomaly: form.scan.selectedAnomaly
     })
 }
 
+// --- V3: 新增丰收动作 ---
+function handleHarvest() {
+    emit('action', 'harvest', {})
+}
+
+// --- V3: 更新摘要 ---
 const summaryHtml = computed(() => {
-    const data = props.nft.data || {};
-    const rarity = data.rarity_score?.total || '未知';
+    const rarity = rarity_score.value.total || '未知';
     const name = displayName.value;
-    const anomalies = data.anomalies?.length || 0;
+    const anomalies = nftData.value.anomalies?.length || 0;
+    const currentJph = jph.value || 0;
+    
     const anomalyTag = anomalies > 0 ? `<span class="anomaly-tag">+${anomalies} 信号</span>` : '';
+    const jphTag = currentJph > 0 ? `<span class="jph-tag">💰 ${currentJph.toFixed(2)} JPH</span>` : '';
 
     return `
         <div class="summary-wrapper">
             <span class="nft-type-tag">星球</span>
             <span class="nft-title">🪐 ${name}</span>
             <span class="nft-status status-rarity">稀有度: ${rarity}</span>
+            ${jphTag}
             ${anomalyTag}
         </div>
     `
@@ -90,23 +147,42 @@ const summaryHtml = computed(() => {
       </div>
 
       <ul class="nft-data" v-if="nft.data">
-          <li><strong>坐标:</strong> <code>{{ nft.data.galactic_coordinates || 'N/A' }}</code></li>
-          <li><strong>稀有度:</strong> {{ nft.data.rarity_score?.total || 'N/A' }}</li>
-          <li><strong>恒星类别:</strong> {{ nft.data.stellar_class || 'N/A' }}</li>
-          <li><strong>星球类型:</strong> {{ nft.data.planet_type || 'N/A' }}</li>
-          <li v-if="nft.data.unlocked_traits?.length"><strong>已揭示特质:</strong> {{ nft.data.unlocked_traits.join(', ') }}</li>
-          <li v-if="nft.data.anomalies?.length" class="anomaly"><strong>未探明信号:</strong> {{ nft.data.anomalies.length }} 个</li>
+          <li><strong>坐标:</strong> <code>{{ nftData.galactic_coordinates || 'N/A' }}</code></li>
+          <li><strong>稀有度:</strong> {{ rarity_score.total || 'N/A' }} (基础: {{ rarity_score.base }}, 特质: {{ rarity_score.traits }})</li>
+          <li><strong>恒星类别:</strong> {{ nftData.stellar_class || 'N/A' }}</li>
+          <li><strong>星球类型:</strong> {{ nftData.planet_type || 'N/A' }}</li>
+          
+          <li class="jph-line"><strong>资源产出:</strong> 💰 {{ formatCurrency(jph) }} JCoin / 小时</li>
+          <li class="harvest-line"><strong>丰收状态:</strong> 
+            <span :class="{ 'ready': can_harvest, 'cooldown': !can_harvest }">
+              {{ harvest_cooldown_str }}
+            </span>
+          </li>
+          
+          <li v-if="nftData.unlocked_traits?.length"><strong>已揭示特质:</strong> {{ nftData.unlocked_traits.join(', ') }}</li>
+          <li v-if="nftData.anomalies?.length" class="anomaly"><strong>未探明信号:</strong> {{ nftData.anomalies.length }} 个</li>
       </ul>
       <div v-else class="nft-data-error">[数据加载失败]</div>
       
       <template v-if="context === 'collection' && nft.data">
-        <div v-if="nft.data.anomalies?.length" class="action-form">
+        
+        <div class="action-form harvest-form" v-if="jph > 0">
+            <h4>⛏️ 资源丰收</h4>
+            <p class="help-text">收集该行星累积的 JCoin。冷却时间: {{ HARVEST_COOLDOWN_SECONDS / 3600 }} 小时。</p>
+            <form @submit.prevent="handleHarvest">
+                <button type="submit" :disabled="!can_harvest">
+                  {{ can_harvest ? '立即丰收' : '冷却中...' }}
+                </button>
+            </form>
+        </div>
+
+        <div v-if="nftData.anomalies?.length" class="action-form">
             <h4>🛰️ 扫描异常信号</h4>
-            <p class="help-text">消耗 5.0 FC 进行深度扫描，可能会有惊人发现。</p>
+            <p class="help-text">消耗 {{ SCAN_COST.toFixed(1) }} FC 进行深度扫描，可能会有惊人发现。</p>
             <form @submit.prevent="handleScan">
                 <div class="form-group">
                     <select v-model="form.scan.selectedAnomaly">
-                        <option v-for="anomaly in nft.data.anomalies" :key="anomaly" :value="anomaly">
+                        <option v-for="anomaly in nftData.anomalies" :key="anomaly" :value="anomaly">
                             {{ ANOMALY_NAMES[anomaly] || anomaly }}
                         </option>
                         </select>
@@ -119,7 +195,7 @@ const summaryHtml = computed(() => {
             <h4>✏️ 重命名星球</h4>
             <form @submit.prevent="handleRename">
                 <div class="form-group">
-                    <input type="text" v-model="form.rename.newName" placeholder="输入新的星球名称" required maxlength="20" />
+                    <input type="text" v-model="form.rename.newName" placeholder="输入新的星球名称" required maxlength="30" />
                 </div>
                 <button type="submit">确认命名</button>
             </form>
@@ -156,6 +232,7 @@ const summaryHtml = computed(() => {
 .nft-header { border-bottom: 1px solid #e2e8f0; margin: 0; }
 .action-form { border-top: 1px solid #f0f2f5; }
 .sell-form { background: #f7fafc; }
+.harvest-form { background: #f0fff4; } /* 丰收表单用绿色背景 */
 h3, h4 { margin: 0; margin-bottom: 0.75rem; }
 h4 { font-size: 1rem; }
 .nft-name { margin-top: 0.75rem; font-size: 1.25rem; color: #2d3748; }
@@ -172,11 +249,19 @@ button { width: 100%; padding: 0.75rem; font-weight: 600; background-color: #42b
 .nft-data-error { color: #c53030; font-style: italic; padding: 1rem 1.25rem; }
 .help-text { font-size: 0.8rem; color: #718096; margin-top: -0.5rem; margin-bottom: 0.75rem;}
 
-/* --- Summary 内部样式 (保持不变) --- */
+/* --- V3 产出样式 --- */
+.jph-line strong { color: #2f855a; }
+.harvest-line span { font-weight: 600; }
+.harvest-line span.ready { color: #2f855a; }
+.harvest-line span.cooldown { color: #4a5568; }
+
+/* --- Summary 内部样式 (V3 修改) --- */
 .summary-wrapper {
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: nowrap; /* 防止换行 */
+    overflow: hidden;
 }
 .nft-type-tag {
     font-size: 0.75rem;
@@ -194,6 +279,7 @@ button { width: 100%; padding: 0.75rem; font-weight: 600; background-color: #42b
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    flex-shrink: 1; /* 标题可以被压缩 */
 }
 .nft-status.status-rarity {
     font-size: 0.85rem;
@@ -212,5 +298,14 @@ button { width: 100%; padding: 0.75rem; font-weight: 600; background-color: #42b
     flex-shrink: 0;
     color: #dd6b20;
     background-color: #fffaf0;
+}
+.jph-tag {
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    flex-shrink: 0;
+    color: #2f855a;
+    background-color: #c6f6d5;
 }
 </style>

@@ -11,6 +11,9 @@ from backend.api.models import (
 )
 from backend.api.dependencies import get_verified_nft_action_message
 from backend.nft_logic import NFT_HANDLERS, get_handler
+# (V3 新增导入)
+from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, BURN_ACCOUNT, GENESIS_ACCOUNT
+from backend.nft_logic.planet import PLANET_ECONOMICS # 导入经济配置以获取扫描成本
 
 router = APIRouter()
 
@@ -55,31 +58,44 @@ def api_perform_nft_action(request: NFTActionRequest):
     if not is_valid:
         raise HTTPException(status_code=400, detail=reason)
 
-    # (新增) 处理需要消耗 FC 的动作，例如 'scan'
-    if message.action == 'scan': # 这是一个示例，你可以将其做得更通用
-        scan_cost = 5.0 # 应该从配置中读取
-        current_balance = queries_user.get_balance(message.owner_key)
-        if current_balance < scan_cost:
-            raise HTTPException(status_code=400, detail=f"余额不足以支付 {scan_cost} FC 的扫描费用")
+    # (V3 核心修改：将 'scan' 和 'harvest' 纳入事务处理)
+    if message.action == 'scan' or message.action == 'harvest':
         
-        # 在数据库事务中执行
-        from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, BURN_ACCOUNT
         with LEDGER_LOCK, get_db_connection() as conn:
-            # 1. 扣款
-            success_pay, detail_pay = _create_system_transaction(
-                message.owner_key, BURN_ACCOUNT, scan_cost, f"NFT 扫描: {nft['nft_id'][:8]}", conn
-            )
-            if not success_pay:
-                conn.rollback()
-                raise HTTPException(status_code=500, detail=f"支付失败: {detail_pay}")
+            
+            # --- 1. 处理成本 (如果是 'scan') ---
+            if message.action == 'scan':
+                # (V3 修改：从经济配置中读取扫描成本)
+                scan_cost = PLANET_ECONOMICS.get('SCAN_COST', 5.0) 
+                current_balance = queries_user.get_balance(message.owner_key) # (V3: 在锁外获取余额)
+                if current_balance < scan_cost:
+                    raise HTTPException(status_code=400, detail=f"余额不足以支付 {scan_cost} FC 的扫描费用")
+                
+                success_pay, detail_pay = _create_system_transaction(
+                    message.owner_key, BURN_ACCOUNT, scan_cost, f"NFT 扫描: {nft['nft_id'][:8]}", conn
+                )
+                if not success_pay:
+                    conn.rollback()
+                    raise HTTPException(status_code=500, detail=f"支付失败: {detail_pay}")
 
-            # 2. 执行动作
+            # --- 2. 执行动作 (scan 或 harvest) ---
             success, detail, updated_data = handler.perform_action(nft, message.action, message.action_data, message.owner_key)
             if not success:
                 conn.rollback()
                 raise HTTPException(status_code=500, detail=detail)
 
-            # 3. 更新 NFT 数据
+            # --- 3. (V3 新增) 处理产出 (如果是 'harvest') ---
+            if message.action == 'harvest':
+                jcoin_produced = updated_data.pop('__jcoin_produced__', 0.0)
+                if jcoin_produced > 0:
+                    success_grant, detail_grant = _create_system_transaction(
+                        GENESIS_ACCOUNT, message.owner_key, jcoin_produced, f"行星丰收: {nft['nft_id'][:8]}", conn
+                    )
+                    if not success_grant:
+                        conn.rollback()
+                        raise HTTPException(status_code=500, detail=f"丰收成功但JCoin发放失败: {detail_grant}")
+
+            # --- 4. 更新 NFT 数据 ---
             new_status = updated_data.pop('__new_status__', None)
             from backend.db.queries_nft import update_nft # 避免循环导入
             
@@ -111,7 +127,6 @@ def api_perform_nft_action(request: NFTActionRequest):
 
         update_success, update_detail = queries_nft.update_nft(message.nft_id, updated_data, new_status)
         if not update_success:
-            # 注意：这里的操作没有回滚，因为动作已执行。这是一个需要权衡的地方。
             raise HTTPException(status_code=500, detail=f"执行成功但数据更新失败: {update_detail}")
 
         return SuccessResponse(detail=detail)
