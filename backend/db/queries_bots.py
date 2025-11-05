@@ -66,9 +66,13 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
     # +++ 核心修改 1: 延迟导入以解决循环依赖 +++
     from backend.bots import BOT_LOGIC_MAP
     # (根据你的新机器人逻辑，决定从哪里导入)
-    from backend.bots.planet_bots import get_random_chinese_name
-    # +++ 核心修改 1 结束 +++
-
+    
+    # --- 修改这里 ---
+    # 导入两个命名函数
+    from backend.bots.planet_bots import get_random_chinese_name as get_planet_name
+    from backend.bots.bio_dna_bots import get_random_chinese_name as get_bio_dna_name
+    # --- 修改结束 ---
+    
     with LEDGER_LOCK, get_db_connection() as conn:
         try:
             cursor = conn.cursor()
@@ -78,13 +82,16 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
             if not BotClass:
                 return False, "无效的机器人类型", None
                 
-            # 使用传入值，否则使用类默认值
             funds = initial_funds if initial_funds is not None else getattr(BotClass, 'DEFAULT_FUNDS', 1000.0)
             prob = action_probability if action_probability is not None else getattr(BotClass, 'DEFAULT_PROBABILITY', 0.1)
-
             if not username:
-                username = get_random_chinese_name(bot_type)
-                # ... (用户名去重逻辑不变) ...
+                # 根据 bot_type 选择对应的命名函数
+                if bot_type == "PlanetCapitalistBot":
+                    username = get_planet_name()
+                elif bot_type == "BIO_DNA_BOT":
+                    username = get_bio_dna_name()
+                else:
+                    username = f"Bot_{bot_type}" # 备用
                 counter = 1
                 base_username = username
                 while True:
