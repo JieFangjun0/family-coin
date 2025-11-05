@@ -9,7 +9,6 @@ from cryptography.hazmat.primitives import serialization
 
 """
 机器人 API 客户端 (BotClient) V2
-
 - 这是一个异步客户端 (使用 httpx)，允许机器人并发执行操作。
 - (重构) 它不再需要登录。它在初始化时直接接收私钥。
 """
@@ -101,7 +100,6 @@ class BotClient:
         data, error = await self.api_call('GET', '/nfts/my', params={"public_key": self.public_key})
         return data.get('nfts', []) if data else []
 
-    # +++ 在这里添加新方法 +++
     async def get_my_activity(self) -> tuple[List[dict], List[dict]]:
         """(新增) 获取机器人自己的市场活动。"""
         data, error = await self.api_call('GET', '/market/my_activity', params={"public_key": self.public_key})
@@ -109,7 +107,7 @@ class BotClient:
             print(f"❌ Bot '{self.username}' 无法获取 /market/my_activity: {error}")
             return [], [] # 返回空列表以防止崩溃
         return data.get('listings', []), data.get('offers', [])
-    # +++ 添加结束 +++
+
     async def get_market_listings(self, listing_type: str) -> List[dict]:
         data, error = await self.api_call('GET', '/market/listings', params={
             "listing_type": listing_type,
@@ -186,3 +184,17 @@ class BotClient:
         
         # (核心修改) 从响应中解析 nft_id
         return True, data.get('detail'), data.get('nft_id')
+
+    # +++ (新增) 允许机器人执行 NFT 动作 +++
+    async def nft_action(self, nft_id: str, action: str, action_data: dict) -> (bool, str):
+        """(新增) 对自己的 NFT 执行一个动作 (例如: 扫描)。"""
+        message = {
+            "owner_key": self.public_key,
+            "nft_id": nft_id,
+            "action": action,
+            "action_data": action_data,
+            "timestamp": time.time()
+        }
+        signed_payload = self._sign_payload(message)
+        data, error = await self.api_call('POST', '/nfts/action', payload=signed_payload)
+        return (True, data.get('detail')) if not error else (False, error)
