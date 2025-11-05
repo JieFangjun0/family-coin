@@ -6,28 +6,27 @@ import { formatCurrency, formatTimestamp } from '@/utils/formatters'
 
 const authStore = useAuthStore()
 
-// --- Component State ---
+// --- 组件状态 ---
 const isLoading = ref(true)
 const errorMessage = ref(null)
 const successMessage = ref(null)
 const adminSecret = ref('')
-const activeTab = ref('balances')
+const activeTab = ref('user_management') // 默认标签页已修改
 
-// --- Data ---
+// --- 数据 ---
 const allUsers = ref([])
 const allBalances = ref([])
 const nftTypes = ref([])
-const nftMintHelpText = ref('') // For bug #3
+const nftMintHelpText = ref('') 
 
-// --- (新增) V2 机器人状态 ---
+// 机器人状态
 const allBots = ref([])
 const botTypes = ref([])
 const showBotManager = ref(null) // 用于显示单个机器人的管理模态框
-// +++ (新增) 机器人日志状态 +++
 const botLogs = ref([])
 const logFilterKey = ref('') // 用于日志过滤
-// +++ 新增结束 +++
-// --- Forms ---
+
+// --- 表单 ---
 const forms = reactive({
   issue: { to_key: '', amount: 1000, note: '管理员增发' },
   multiIssue: { user_keys: [], amount: 100, note: '批量增发' },
@@ -40,12 +39,10 @@ const forms = reactive({
     default_invitation_quota: 5,
     welcome_bonus_amount: 500,
     inviter_bonus_amount: 200,
-    // (新增) 机器人全局设置
     bot_system_enabled: 'False',
     bot_check_interval_seconds: 30
   },
   nuke: { confirm_text: '' },
-  // (新增) V2 机器人表单
   bots: {
     create: {
       username: '',
@@ -63,35 +60,24 @@ const forms = reactive({
   }
 })
 
-// --- Computed Properties ---
+// --- 计算属性 ---
 const userOptions = computed(() => {
   return allUsers.value.map(u => ({ text: `${u.username} (UID: ${u.uid})`, value: u.public_key }))
 })
 
-// (修改) 这个计算属性现在也用于机器人管理
+// 这个计算属性现在用于“用户管理”标签页中的精细管理
 const selectedUserForManagement = computed(() => {
-  // 优先看 'users' 标签页选中的人
   let key = forms.burn.from_key;
-  if (activeTab.value === 'bots' && showBotManager.value) {
-    // 如果在 'bots' 标签页，看机器人模态框选中的机器人
-    key = showBotManager.value.public_key;
-  }
-  
-  // 机器人不在 allBalances 列表里，所以我们从 allBots 找
-  if (activeTab.value === 'bots' && showBotManager.value) {
-     return allBots.value.find(b => b.public_key === key);
-  }
-  // 否则，从人类用户列表里找
   return allBalances.value.find(u => u.public_key === key);
 })
 
-// --- Watchers ---
-// (NFT Watcher 保持不变)
+// --- 侦听器 ---
+// 当NFT类型改变时，加载对应的帮助信息和默认JSON
 watch(() => forms.mintNft.nft_type, async (newType) => {
   if (!newType || !adminSecret.value) return;
   
   nftMintHelpText.value = '正在加载...';
-  forms.mintNft.data = '{}'; // Reset on change
+  forms.mintNft.data = '{}'; // 重置
 
   const [data, error] = await apiCall('GET', `/admin/nft/mint_info/${newType}`, { headers: adminHeaders.value });
   if (error) {
@@ -102,10 +88,10 @@ watch(() => forms.mintNft.nft_type, async (newType) => {
   }
 })
 
-// --- API Headers ---
+// --- API 请求头 ---
 const adminHeaders = computed(() => ({ 'X-Admin-Secret': adminSecret.value }))
 
-// --- Methods ---
+// --- 方法 ---
 async function fetchData() {
   if (!adminSecret.value) {
     errorMessage.value = '请输入 Admin Secret 以加载数据。'
@@ -128,31 +114,31 @@ async function fetchData() {
     }) 
   ]);
 
-  // (不变) Process users
+  // 处理用户
   if (usersRes[1]) errorMessage.value = `加载用户列表失败: ${usersRes[1]}`
   else allUsers.value = usersRes[0].users
 
-  // (不变) Process balances
+  // 处理余额
   if (balancesRes[1]) errorMessage.value = `加载余额列表失败: ${balancesRes[1]}`
   else allBalances.value = balancesRes[0].balances.sort((a, b) => a.username.localeCompare(b.username));
 
-  // (不变) Process NFT types
+  // 处理NFT类型
   if (nftTypesRes[1]) errorMessage.value = `加载NFT类型失败: ${nftTypesRes[1]}`
   else {
     nftTypes.value = nftTypesRes[0]
     if (nftTypes.value.length > 0 && !forms.mintNft.nft_type) {
-      forms.mintNft.nft_type = nftTypes.value[0] // Set initial value, triggers watcher
+      forms.mintNft.nft_type = nftTypes.value[0] // 设置初始值, 触发侦听器
     }
   }
 
-  // (新增) Process V2 Bot List
+  // 处理机器人列表
   if (botListRes[1]) {
     errorMessage.value = (errorMessage.value || '') + `\n加载机器人列表失败: ${botListRes[1]}`
   } else {
     allBots.value = botListRes[0].bots.sort((a,b) => a.username.localeCompare(b.username));
   }
   
-  // (新增) Process V2 Bot Types
+  // 处理机器人类型
   if (botTypesRes[1]) {
      errorMessage.value = (errorMessage.value || '') + `\n加载机器人类型失败: ${botTypesRes[1]}`
   } else {
@@ -161,13 +147,15 @@ async function fetchData() {
       forms.bots.create.bot_type = botTypes.value[0];
     }
   }
-  // +++ (新增) Process V2 Bot Logs +++
+
+  // 处理机器人日志
   if (botLogsRes[1]) {
     errorMessage.value = (errorMessage.value || '') + `\n加载机器人日志失败: ${botLogsRes[1]}`
   } else {
     botLogs.value = botLogsRes[0].logs
   }
-  // (修改) Fetch settings (包括机器人的)
+  
+  // 获取设置 (包括机器人的)
   await fetchSettings(['default_invitation_quota', 'welcome_bonus_amount', 'inviter_bonus_amount', 'bot_system_enabled', 'bot_check_interval_seconds'])
 
   isLoading.value = false
@@ -177,7 +165,7 @@ async function fetchSettings(keys) {
     for (const key of keys) {
         const [data, error] = await apiCall('GET', `/admin/setting/${key}`, { headers: adminHeaders.value });
         if (!error) {
-            // (修改) 处理布尔值和数字
+            // 处理布尔值和数字
             if (key.includes('enabled')) {
               forms.settings[key] = data.value; // 存为 'True'/'False' 字符串
             } else {
@@ -187,7 +175,7 @@ async function fetchSettings(keys) {
     }
 }
 
-// +++ (新增) 专门用于刷新日志的方法 +++
+// 专门用于刷新日志的方法
 async function fetchLogsOnly() {
   const [botLogsRes, error] = await apiCall('GET', '/admin/bots/logs', { 
     headers: adminHeaders.value,
@@ -200,6 +188,7 @@ async function fetchLogsOnly() {
     successMessage.value = "日志已刷新";
   }
 }
+
 async function handleApiCall(method, endpoint, payload, successMsg, options = {}) {
   const { skipFetch = false } = options;
   successMessage.value = null
@@ -215,10 +204,9 @@ async function handleApiCall(method, endpoint, payload, successMsg, options = {}
   }
 }
 
-// --- (修改) 拆分设置保存逻辑 ---
+// 拆分设置保存逻辑
 function handleSetSetting(key) {
     let value = forms.settings[key];
-    // (新增) 布尔值需要转为 'True' 或 'False' 字符串
     if (key.includes('enabled')) {
         value = (forms.settings[key] === true || forms.settings[key] === 'True') ? 'True' : 'False';
     }
@@ -226,7 +214,7 @@ function handleSetSetting(key) {
     handleApiCall('POST', '/admin/set_setting', payload, '系统设置更新成功', { skipFetch: true });
 }
 
-// (不变) 人类用户管理
+// 人类用户管理
 function handleSingleIssue() {
   handleApiCall('POST', '/admin/issue', forms.issue, '增发成功')
 }
@@ -274,10 +262,8 @@ function handleNukeSystem() {
     handleApiCall('POST', '/admin/nuke_system', {}, '系统重置成功');
 }
 
-// --- (新增) V2 机器人管理方法 ---
-
+// 机器人管理方法
 function handleSaveBotGlobalSettings() {
-  // 两个设置是分开保存的
   handleSetSetting('bot_system_enabled');
   handleSetSetting('bot_check_interval_seconds');
 }
@@ -308,13 +294,13 @@ function closeBotManager() {
   showBotManager.value = null;
 }
 
-// (新增) 切换机器人状态
+// 切换机器人状态
 async function handleToggleBotStatus(bot) {
   const payload = { public_key: bot.public_key, is_active: !bot.is_active };
   await handleApiCall('POST', '/admin/set_user_active_status', payload, '机器人状态更新成功');
 }
 
-// (新增) 微观管理 - 调整概率
+// 微观管理 - 调整概率
 async function handleSetBotProbability() {
   const payload = {
     public_key: forms.bots.manage.public_key,
@@ -324,7 +310,7 @@ async function handleSetBotProbability() {
   closeBotManager();
 }
 
-// (新增) 微观管理 - 增发
+// 微观管理 - 增发
 async function handleIssueToBot() {
   const payload = {
     to_key: forms.bots.manage.public_key,
@@ -335,7 +321,7 @@ async function handleIssueToBot() {
   closeBotManager();
 }
 
-// (新增) 微观管理 - 减持
+// 微观管理 - 减持
 async function handleBurnFromBot() {
   const payload = {
     from_key: forms.bots.manage.public_key,
@@ -346,7 +332,7 @@ async function handleBurnFromBot() {
   closeBotManager();
 }
 
-// (新增) 微观管理 - 清除
+// 微观管理 - 清除
 async function handlePurgeBot() {
   if (forms.bots.manage.confirm_purge !== showBotManager.value.username) {
     errorMessage.value = '确认用户名输入不正确！';
@@ -382,17 +368,15 @@ onMounted(() => {
 
     <div v-if="!isLoading && adminSecret" class="admin-content">
       <div class="admin-tabs">
-        <button :class="{ active: activeTab === 'balances' }" @click="activeTab = 'balances'">人类用户</button>
-        <button :class="{ active: activeTab === 'bots' }" @click="activeTab = 'bots'">🤖 机器人管理</button>
-        <button :class="{ active: activeTab === 'bot_logs' }" @click="activeTab = 'bot_logs'">📊 机器人日志</button>
-        <button :class="{ active: activeTab === 'currency' }" @click="activeTab = 'currency'">货币管理</button>
-        <button :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户管理 (旧)</button>
-        <button :class="{ active: activeTab === 'nft' }" @click="activeTab = 'nft'">NFT 管理</button>
+        <button :class="{ active: activeTab === 'user_management' }" @click="activeTab = 'user_management'">用户管理</button>
+        <button :class="{ active: activeTab === 'bot_management' }" @click="activeTab = 'bot_management'">机器人管理</button>
         <button :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">系统设置</button>
       </div>
 
-      <div v-if="activeTab === 'balances'" class="tab-content">
-        <h2>人类用户 (Ledger)</h2>
+      <div v-if="activeTab === 'user_management'" class="tab-content">
+        <h2>人类用户管理</h2>
+        
+        <h3 class="divider-header">用户列表</h3>
         <div class="table-wrapper">
           <table>
             <thead>
@@ -425,10 +409,125 @@ onMounted(() => {
             </tbody>
           </table>
         </div>
+
+        <h3 class="divider-header">货币管理 (人类)</h3>
+        <div class="grid-2-col">
+          <form @submit.prevent="handleSingleIssue" class="admin-form">
+            <h4>增发货币 (单人)</h4>
+            <div class="form-group">
+              <label>目标用户</label>
+              <select v-model="forms.issue.to_key">
+                <option disabled value="">-- 选择用户 --</option>
+                <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>发行金额</label>
+              <input type="number" v-model.number="forms.issue.amount" min="1" step="0.01" />
+            </div>
+            <div class="form-group">
+              <label>备注</label>
+              <input type="text" v-model="forms.issue.note" />
+            </div>
+            <button type="submit">确认发行</button>
+          </form>
+
+          <form @submit.prevent="handleMultiIssue" class="admin-form">
+              <h4>批量增发</h4>
+              <div class="form-group">
+                  <label>目标用户 (可多选)</label>
+                  <select v-model="forms.multiIssue.user_keys" multiple size="5">
+                      <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
+                  </select>
+              </div>
+              <div class="form-group">
+                  <label>统一发行金额</label>
+                  <input type="number" v-model.number="forms.multiIssue.amount" min="1" step="0.01" />
+              </div>
+              <div class="form-group">
+                  <label>备注</label>
+                  <input type="text" v-model="forms.multiIssue.note" />
+              </div>
+              <button type="submit">确认批量发行</button>
+          </form>
+        </div>
+
+        <h3 class="divider-header">精细管理 (人类)</h3>
+        <div class="form-group">
+          <label>选择要管理的用户</label>
+          <select v-model="forms.burn.from_key">
+              <option disabled value="">-- 选择用户 --</option>
+              <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
+          </select>
+        </div>
+        <div v-if="selectedUserForManagement" class="grid-2-col">
+          <form @submit.prevent="handleBurn" class="admin-form">
+              <h4>减持货币</h4>
+              <div class="form-group">
+                  <label>减持金额</label>
+                  <input type="number" v-model.number="forms.burn.amount" min="0.01" step="0.01" />
+              </div>
+              <div class="form-group">
+                  <label>减持备注 (必填)</label>
+                  <input type="text" v-model="forms.burn.note" required />
+              </div>
+              <button type="submit">确认减持</button>
+          </form>
+          <form @submit.prevent="handleAdjustQuota" class="admin-form">
+              <h4>调整邀请额度</h4>
+              <div class="form-group">
+                  <label>新的邀请额度</label>
+                  <input type="number" v-model.number="forms.adjustQuota.new_quota" min="0" />
+              </div>
+              <button type="submit">确认调整</button>
+          </form>
+          <form @submit.prevent="handleResetPassword" class="admin-form">
+              <h4>重置密码</h4>
+              <div class="form-group">
+                  <label>新密码 (至少6位)</label>
+                  <input type="password" v-model="forms.resetPassword.new_password" required minlength="6" />
+              </div>
+              <button type="submit">确认重置</button>
+          </form>
+          <form @submit.prevent="handlePurgeUser(selectedUserForManagement.public_key, forms.purgeUser.confirm_username, selectedUserForManagement.username)" class="admin-form danger-zone">
+              <h4>彻底清除用户 (危险)</h4>
+              <p>此操作不可逆，将删除用户所有数据！</p>
+                <div class="form-group">
+                  <label>输入用户名 `{{ selectedUserForManagement.username }}` 以确认</label>
+                  <input type="text" v-model="forms.purgeUser.confirm_username" />
+                </div>
+              <button type="submit" class="danger-button">确认清除</button>
+          </form>
+        </div>
+        
+        <h3 class="divider-header">NFT 铸造 (人类)</h3>
+        <form @submit.prevent="handleMintNft" class="admin-form">
+          <div class="grid-2-col">
+              <div class="form-group">
+                  <label>接收用户</label>
+                  <select v-model="forms.mintNft.to_key">
+                      <option disabled value="">-- 选择人类用户 --</option>
+                      <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
+                  </select>
+              </div>
+              <div class="form-group">
+                  <label>NFT 类型</label>
+                  <select v-model="forms.mintNft.nft_type">
+                      <option v-for="type in nftTypes" :key="type" :value="type">{{ type }}</option>
+                  </select>
+              </div>
+          </div>
+            <div class="form-group">
+              <label>初始数据 (JSON格式)</label>
+              <p class="help-text">{{ nftMintHelpText }}</p>
+              <textarea v-model="forms.mintNft.data" rows="8" :key="forms.mintNft.nft_type"></textarea>
+            </div>
+            <button type="submit">确认铸造</button>
+        </form>
       </div>
 
-      <div v-if="activeTab === 'bots'" class="tab-content">
-        <h2>🤖 机器人系统管理 (V2)</h2>
+      <div v-if="activeTab === 'bot_management'" class="tab-content">
+        <h2>机器人系统管理</h2>
         
         <div class="grid-2-col">
           <form @submit.prevent="handleSaveBotGlobalSettings" class="admin-form">
@@ -510,9 +609,8 @@ onMounted(() => {
             </tbody>
           </table>
         </div>
-      </div>
-      <div v-if="activeTab === 'bot_logs'" class="tab-content">
-        <h2>📊 机器人日志</h2>
+
+        <h3 class="divider-header">机器人日志</h3>
         <p class="subtitle">查看机器人最近的操作。日志按时间倒序排列。</p>
         
         <div class="log-filter-bar">
@@ -555,128 +653,32 @@ onMounted(() => {
             </tbody>
           </table>
         </div>
-      </div>
-      <div v-if="activeTab === 'currency'" class="tab-content grid-2-col">
-        <form @submit.prevent="handleSingleIssue" class="admin-form">
-          <h2>增发货币 (单人)</h2>
-          <div class="form-group">
-            <label>目标用户 (人类)</label>
-            <select v-model="forms.issue.to_key">
-              <option disabled value="">-- 选择用户 --</option>
-              <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>发行金额</label>
-            <input type="number" v-model.number="forms.issue.amount" min="1" step="0.01" />
-          </div>
-          <div class="form-group">
-            <label>备注</label>
-            <input type="text" v-model="forms.issue.note" />
-          </div>
-          <button type="submit">确认发行</button>
-        </form>
 
-        <form @submit.prevent="handleMultiIssue" class="admin-form">
-            <h2>批量增发 (人类)</h2>
-             <div class="form-group">
-                <label>目标用户 (可多选)</label>
-                <select v-model="forms.multiIssue.user_keys" multiple size="5">
-                    <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
-                </select>
-             </div>
-             <div class="form-group">
-                <label>统一发行金额</label>
-                <input type="number" v-model.number="forms.multiIssue.amount" min="1" step="0.01" />
-             </div>
-             <div class="form-group">
-                <label>备注</label>
-                <input type="text" v-model="forms.multiIssue.note" />
-             </div>
-             <button type="submit">确认批量发行</button>
-        </form>
-      </div>
-
-      <div v-if="activeTab === 'users'" class="tab-content">
-        <h2>(旧) 人类用户管理</h2>
-         <div class="form-group">
-            <label>选择要管理的用户</label>
-            <select v-model="forms.burn.from_key">
-                <option disabled value="">-- 选择用户 --</option>
-                <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
-            </select>
-         </div>
-         <div v-if="selectedUserForManagement" class="grid-2-col">
-            <form @submit.prevent="handleBurn" class="admin-form">
-                <h3>减持货币</h3>
-                <div class="form-group">
-                    <label>减持金额</label>
-                    <input type="number" v-model.number="forms.burn.amount" min="0.01" step="0.01" />
-                </div>
-                <div class="form-group">
-                    <label>减持备注 (必填)</label>
-                    <input type="text" v-model="forms.burn.note" required />
-                </div>
-                <button type="submit">确认减持</button>
-            </form>
-            <form @submit.prevent="handleAdjustQuota" class="admin-form">
-                <h3>调整邀请额度</h3>
-                <div class="form-group">
-                    <label>新的邀请额度</label>
-                    <input type="number" v-model.number="forms.adjustQuota.new_quota" min="0" />
-                </div>
-                <button type="submit">确认调整</button>
-            </form>
-            <form @submit.prevent="handleResetPassword" class="admin-form">
-                <h3>重置密码</h3>
-                <div class="form-group">
-                    <label>新密码 (至少6位)</label>
-                    <input type="password" v-model="forms.resetPassword.new_password" required minlength="6" />
-                </div>
-                <button type="submit">确认重置</button>
-            </form>
-            <form @submit.prevent="handlePurgeUser(selectedUserForManagement.public_key, forms.purgeUser.confirm_username, selectedUserForManagement.username)" class="admin-form danger-zone">
-                <h3>彻底清除用户 (危险)</h3>
-                <p>此操作不可逆，将删除用户所有数据！</p>
-                 <div class="form-group">
-                    <label>输入用户名 `{{ selectedUserForManagement.username }}` 以确认</label>
-                    <input type="text" v-model="forms.purgeUser.confirm_username" />
-                 </div>
-                <button type="submit" class="danger-button">确认清除</button>
-            </form>
-         </div>
-      </div>
-
-      <div v-if="activeTab === 'nft'" class="tab-content">
-         <h2>NFT 铸造与发行</h2>
-         <form @submit.prevent="handleMintNft" class="admin-form">
-            <div class="grid-2-col">
-                <div class="form-group">
-                    <label>接收用户 (包括机器人)</label>
-                    <select v-model="forms.mintNft.to_key">
-                        <option disabled value="">-- 选择用户 --</option>
-                        <optgroup label="人类用户">
-                          <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
-                        </optgroup>
-                        <optgroup label="机器人">
-                          <option v-for="bot in allBots" :key="bot.public_key" :value="bot.public_key">{{ bot.username }}</option>
-                        </optgroup>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>NFT 类型</label>
-                    <select v-model="forms.mintNft.nft_type">
-                        <option v-for="type in nftTypes" :key="type" :value="type">{{ type }}</option>
-                    </select>
-                </div>
+        <h3 class="divider-header">NFT 铸造 (机器人)</h3>
+        <form @submit.prevent="handleMintNft" class="admin-form">
+          <div class="grid-2-col">
+              <div class="form-group">
+                  <label>接收机器人</label>
+                  <select v-model="forms.mintNft.to_key">
+                      <option disabled value="">-- 选择机器人 --</option>
+                      <option v-for="bot in allBots" :key="bot.public_key" :value="bot.public_key">{{ bot.username }}</option>
+                  </select>
+              </div>
+              <div class="form-group">
+                  <label>NFT 类型</label>
+                  <select v-model="forms.mintNft.nft_type">
+                      <option v-for="type in nftTypes" :key="type" :value="type">{{ type }}</option>
+                  </select>
+              </div>
+          </div>
+            <div class="form-group">
+              <label>初始数据 (JSON格式)</label>
+              <p class="help-text">{{ nftMintHelpText }}</p>
+              <textarea v-model="forms.mintNft.data" rows="8" :key="forms.mintNft.nft_type"></textarea>
             </div>
-             <div class="form-group">
-                <label>初始数据 (JSON格式)</label>
-                <p class="help-text">{{ nftMintHelpText }}</p>
-                <textarea v-model="forms.mintNft.data" rows="8" :key="forms.mintNft.nft_type"></textarea>
-             </div>
-             <button type="submit">确认铸造</button>
-         </form>
+            <button type="submit">确认铸造</button>
+        </form>
+
       </div>
 
       <div v-if="activeTab === 'settings'" class="tab-content grid-2-col">
@@ -767,7 +769,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* (大部分样式保持不变) */
 .admin-view { max-width: 1200px; margin: 0 auto; }
 .view-header h1 { font-size: 2rem; font-weight: 700; color: #2d3748; }
 .subtitle { color: #718096; margin-bottom: 2rem; }
@@ -781,7 +782,7 @@ onMounted(() => {
 .tab-content h2 { margin-top: 0; margin-bottom: 1.5rem; }
 .grid-2-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; }
 .admin-form { background: #fff; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 1rem; }
-.admin-form h3 { margin: 0 0 0.5rem 0; }
+.admin-form h3, .admin-form h4 { margin: 0 0 0.5rem 0; }
 .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
 .help-text { font-size: 0.8rem; color: #718096; margin-top: -0.5rem; white-space: pre-wrap; }
 label { font-weight: 500; color: #4a5568; }
@@ -807,7 +808,6 @@ td { font-size: 0.9rem; }
 .success { color: #155724; background-color: #d4edda; }
 .error { color: #d8000c; background-color: #ffbaba; }
 
-/* (新增) V2 机器人管理面板的特定样式 */
 .form-group-checkbox {
   display: flex;
   align-items: center;
@@ -847,7 +847,6 @@ h3.divider-header {
 .manage-button {
   background-color: #3182ce;
 }
-/* +++ (新增) 日志标签页特定样式 +++ */
 .log-filter-bar {
   display: flex;
   gap: 1rem;
@@ -894,7 +893,7 @@ td.log-message {
 .action-type .action-tag.market_bid { background-color: #bee3f8; color: #2c5282; }
 .action-type .action-tag.shop_explore { background-color: #faf5ff; color: #553c9a; }
 .action-type .action-tag.nft_action_scan { background-color: #feebc8; color: #975a16; }
-/* (新增) 模态框样式 */
+
 .modal-overlay {
   position: fixed;
   top: 0;
