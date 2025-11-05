@@ -4,6 +4,7 @@ import random
 import time
 import uuid
 import math
+import json  # <<<  Bug 2 修复：导入 json 模块
 from .base import NFTLogicHandler
 from backend.db import queries_nft # 用于繁育时铸造新NFT和更新伴侣
 
@@ -55,6 +56,11 @@ PERSONALITIES = ["Timid", "Brave", "Goofy", "Calm", "Lazy", "Hyper", "Serious", 
 PET_ECONOMICS = {
     # --- 探索 (铸造) ---
     "EXPLORE_COST": 10.0,
+    
+    # <<< Bug 1 修复：新增探索发现概率 >>>
+    "EXPLORE_PROB_DISCOVERY": 0.1, # 10% 的几率发现灵宠
+    
+    # --- (内部概率) 发现灵宠后，稀有度的概率 (总和为1) ---
     "EXPLORE_PROB_COMMON": 0.85,
     "EXPLORE_PROB_UNCOMMON": 0.12,
     "EXPLORE_PROB_RARE": 0.02,
@@ -208,6 +214,12 @@ class BioDnaHandler(NFTLogicHandler):
         """
         处理“探索”动作 (概率性铸造)。
         """
+        
+        # <<< Bug 1 修复：增加未发现的概率分支 >>>
+        if random.random() > PET_ECONOMICS['EXPLORE_PROB_DISCOVERY']:
+            return True, "你仔细搜索了森林，但什么也没发现...", None
+        
+        # --- 发现灵宠，进行稀有度检定 ---
         prob_roll = random.random()
         
         if prob_roll < PET_ECONOMICS['EXPLORE_PROB_MYTHIC']:
@@ -347,7 +359,7 @@ class BioDnaHandler(NFTLogicHandler):
                 base_jph = updated_data['economic_stats']['base_jph']
                 updated_data['economic_stats']['total_jph'] = base_jph + (stats["spirit"] / 100.0)
                 
-                msg = f"🎉 升级！{updated_data['nickname']} 升到了 {updated_data['level']} 级！属性得到了提升！"
+                msg = f"升级！{updated_data['nickname']} 升到了 {updated_data['level']} 级！属性得到了提升！"
             
             updated_data['cooldowns']['train_until'] = now + (3600 * (level / 2)) # 训练冷却时间随等级增加
             return True, msg, updated_data
@@ -446,22 +458,25 @@ class BioDnaHandler(NFTLogicHandler):
             except Exception as e:
                 return False, f"繁育成功但更新伴侣状态失败: {e}", {}
             
-            return True, f"繁育成功！你获得了一只新的【{new_pet_data['species_name']}】 (G{new_gen})！", updated_data
+            return True, f"繁育成功！你获得了一只新的【{new_pet_data['species_name']}】 (第 {new_gen} 代)！", updated_data
 
         # --- 默认调用基类 (用于 'destroy') ---
-        return super().perform_action(nft, action, action_data, requester_key)
+        return super().perform_action(nft, action, action_data, requester_key, conn) # <<< Bug 2 修复：传递 conn
 
     @classmethod
     def get_shop_config(cls) -> dict:
         """商店配置：探索"""
         cost = PET_ECONOMICS['EXPLORE_COST']
+        prob = PET_ECONOMICS['EXPLORE_PROB_DISCOVERY']
+        
+        # <<< Bug 1 修复：更新描述 >>>
         return {
             "creatable": True,
             "cost": cost,
             "name": "探索低语森林",
             "action_type": "probabilistic_mint", # 触发 execute_shop_action
             "action_label": f"支付 {cost} FC 开始探索",
-            "description": f"花费 {cost} FC 探索神秘的低语森林，有几率发现并带回一只常见的 (85%)、罕见的 (12%)、稀有的 (2%) 甚至神话的 (1%) 灵宠。",
+            "description": f"花费 {cost} FC 探索神秘的低语森林。你有 {prob*100:.0f}% 的几率发现一只灵宠。如果成功，你有 85% 几率发现普通、12% 罕见、2% 稀有、1% 神话的灵宠。",
             "fields": []
         }
         
@@ -474,14 +489,15 @@ class BioDnaHandler(NFTLogicHandler):
         level = data.get('level', 1)
         jph = data.get('economic_stats', {}).get('total_jph', 0)
         
-        jph_str = f" | 💰 {jph:.2f} JPH" if jph > 0 else ""
-        return f"Lv.{level} {name} ({species}) [稀有度: {rarity}]{jph_str}"
+        jph_str = f" | {jph:.2f} JPH" if jph > 0 else ""
+        return f"等级 {level} {name} ({species}) [稀有度: {rarity}]{jph_str}"
         
     @classmethod
     def get_admin_mint_config(cls) -> dict:
         """管理员铸造帮助"""
+        # <<< 约束 3 修复：中文化 >>>
         return {
-            "help_text": '为“灵宠”提供: {"species_rarity": "COMMON/UNCOMMON/RARE/MYTHIC", "nickname": "可选", "breeding_limit": 10}',
+            "help_text": '为“灵宠”提供: {"species_rarity": "COMMON/UNCOMMON/RARE/MYTHIC", "nickname": "可选昵称", "breeding_limit": 10}',
             "default_json": '''{
   "species_rarity": "RARE",
   "nickname": "管理员的宠物",

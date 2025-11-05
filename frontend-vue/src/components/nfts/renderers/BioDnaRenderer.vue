@@ -18,6 +18,42 @@ const HARVEST_COOLDOWN_SECONDS = 1 * 3600; // 1 小时
 const TRAIN_COST_PER_LEVEL = 5.0;
 const XP_NEEDED_PER_LEVEL = 100;
 
+// +++ Bug 3 修复: 添加中文化映射 +++
+const RARITY_MAP = {
+    "COMMON": "普通",
+    "UNCOMMON": "罕见",
+    "RARE": "稀有",
+    "MYTHIC": "神话"
+}
+const GENDER_MAP = {
+    "Male": "雄性",
+    "Female": "雌性"
+}
+const PERSONALITY_MAP = {
+    "Timid": "胆小", "Brave": "勇敢", "Goofy": "滑稽", "Calm": "冷静", 
+    "Lazy": "懒惰", "Hyper": "活泼", "Serious": "严肃", "Elegant": "优雅"
+}
+const STAT_MAP = {
+    "vitality": "活力",
+    "spirit": "精神",
+    "agility": "敏捷",
+    "luck": "幸运"
+}
+const GENE_TYPE_MAP = {
+    "COLOR": "颜色",
+    "PATTERN": "花纹",
+    "AURA": "光环"
+}
+// 基因表现型（值）的翻译
+const GENE_VALUE_MAP = {
+    "Red": "红色", "White": "白色", "Black": "黑色", "Yellow": "黄色",
+    "Blue": "蓝色", "Green": "绿色", "Purple": "紫色", "Silver": "银色",
+    "Solid": "纯色", "Stripes": "条纹", "Spots": "斑点", "None": "无",
+    "Sparkle": "闪耀", "Glow": "辉光", "Shadow": "暗影"
+}
+// +++ 修复结束 +++
+
+
 // --- 响应式表单 ---
 const form = reactive({
   list: {
@@ -85,23 +121,56 @@ const can_breed = computed(() => nftData.value.gender === 'Female' && breeds_lef
 
 // --- 摘要 (用于折叠时) ---
 const summaryHtml = computed(() => {
+    // +++ Bug 3 & 5 修复: 移除表情, 中文化 +++
     const name = nftData.value.nickname || '[未命名]';
     const species = nftData.value.species_name || '未知';
     const rarity = nftData.value.species_rarity || 'COMMON';
     
-    const jphTag = jph.value > 0 ? `<span class="jph-tag">💰 ${jph.value.toFixed(2)} JPH</span>` : '';
+    const jphTag = jph.value > 0 ? `<span class="jph-tag">${jph.value.toFixed(2)} JPH</span>` : '';
 
     return `
         <div class="summary-wrapper">
             <span class="nft-type-tag" style="background-color: #f0fff4; color: #2f855a;">灵宠</span>
-            <span class="nft-title">❤️ ${name}</span>
-            <span class="nft-status rarity-${rarity.toLowerCase()}">${species} (Lvl.${level.value})</span>
+            <span class="nft-title">${name}</span>
+            <span class="nft-status rarity-${rarity.toLowerCase()}">${species} (等级 ${level.value})</span>
             ${jphTag}
         </div>
     `
 })
 
+// +++ Bug 5 修复: 添加基因样式函数 +++
+function getGeneStyle(type, value) {
+    if (!value) return {};
+    const styles = {};
+    if (type === 'COLOR') {
+        const colorMap = {
+            "Red": "#E53E3E",
+            "White": "#A0AEC0",
+            "Black": "#1A202C",
+            "Yellow": "#D69E2E",
+            "Blue": "#3182CE",
+            "Green": "#38A169",
+            "Purple": "#805AD5",
+            "Silver": "#718096"
+        };
+        styles.color = colorMap[value] || '#2D3748';
+        styles.fontWeight = 'bold';
+        if (value === 'White' || value === 'Silver') {
+            styles.textShadow = '0 0 2px rgba(0,0,0,0.2)';
+        }
+    } else if (type === 'PATTERN') {
+        if (value === 'Stripes') styles.textDecoration = 'underline wavy';
+        if (value === 'Spots') styles.textDecoration = 'underline dotted';
+    } else if (type === 'AURA') {
+        if (value === 'Sparkle') styles.textShadow = '0 0 5px #ECC94B';
+        if (value === 'Glow') styles.textShadow = '0 0 5px #63B3ED';
+        if (value === 'Shadow') styles.textShadow = '0 0 5px #718096';
+    }
+    return styles;
+}
+
 // --- 动作 ---
+// (所有 handle... 函数保持不变)
 function handleListForSale() {
   emit('action', 'list-for-sale', {
     description: form.list.description,
@@ -161,41 +230,56 @@ function handleBreed() {
     <template v-else>
       <div class="nft-header">
         <h3 class="nft-name">
-          ❤️ {{ nftData.nickname }}
+          {{ nftData.nickname }}
           <span class="species-name">({{ nftData.species_name }})</span>
         </h3>
         <span :class="['nft-status', `rarity-${nftData.species_rarity?.toLowerCase()}`]">
-          {{ nftData.species_rarity }}
+          {{ RARITY_MAP[nftData.species_rarity] || nftData.species_rarity }}
         </span>
       </div>
 
       <div class="nft-data-grid">
         <div class="stat-group">
-            <h4><span class="stat-icon">📈</span> 养成</h4>
+            <h4>养成</h4>
             <ul>
                 <li><strong>等级:</strong> {{ level }}</li>
                 <li><strong>经验:</strong> {{ xp }} / {{ xp_needed }}</li>
-                <li><strong>产出:</strong> 💰 {{ jph.toFixed(2) }} JCoin / 小时</li>
-                <li><strong>性别:</strong> {{ nftData.gender }}</li>
-                <li><strong>世代:</strong> G{{ nftData.generation }}</li>
-                <li><strong>性格:</strong> {{ nftData.personality }}</li>
+                <li><strong>产出:</strong> {{ jph.toFixed(2) }} JCoin / 小时</li>
+                <li><strong>性别:</strong> {{ GENDER_MAP[nftData.gender] || nftData.gender }}</li>
+                <li><strong>世代:</strong> 第 {{ nftData.generation }} 代</li>
+                <li><strong>性格:</strong> {{ PERSONALITY_MAP[nftData.personality] || nftData.personality }}</li>
             </ul>
-            <h4><span class="stat-icon">🧬</span> 基因</h4>
+            <h4>基因</h4>
             <ul>
-                <li><strong>颜色:</strong> {{ visible.color }} <code class="genes">({{ genes.COLOR?.join(', ') }})</code></li>
-                <li><strong>花纹:</strong> {{ visible.pattern }} <code class="genes">({{ genes.PATTERN?.join(', ') }})</code></li>
-                <li><strong>光环:</strong> {{ visible.aura }} <code class="genes">({{ genes.AURA?.join(', ') }})</code></li>
+                <li>
+                    <strong>{{ GENE_TYPE_MAP['COLOR'] }}:</strong>
+                    <span :style="getGeneStyle('COLOR', visible.color)">
+                        {{ GENE_VALUE_MAP[visible.color] || visible.color }}
+                    </span>
+                </li>
+                <li>
+                    <strong>{{ GENE_TYPE_MAP['PATTERN'] }}:</strong>
+                    <span :style="getGeneStyle('PATTERN', visible.pattern)">
+                        {{ GENE_VALUE_MAP[visible.pattern] || visible.pattern }}
+                    </span>
+                </li>
+                <li>
+                    <strong>{{ GENE_TYPE_MAP['AURA'] }}:</strong>
+                    <span :style="getGeneStyle('AURA', visible.aura)">
+                        {{ GENE_VALUE_MAP[visible.aura] || visible.aura }}
+                    </span>
+                </li>
             </ul>
         </div>
         <div class="stat-group">
-            <h4><span class="stat-icon">📊</span> 潜力</h4>
+            <h4>潜力</h4>
             <ul>
-                <li><strong>活力 (Vit):</strong> {{ stats.vitality }}</li>
-                <li><strong>精神 (Spi):</strong> {{ stats.spirit }}</li>
-                <li><strong>敏捷 (Agi):</strong> {{ stats.agility }}</li>
-                <li><strong>幸运 (Luk):</strong> {{ stats.luck }}</li>
+                <li><strong>{{ STAT_MAP['vitality'] }}:</strong> {{ stats.vitality }}</li>
+                <li><strong>{{ STAT_MAP['spirit'] }}:</strong> {{ stats.spirit }}</li>
+                <li><strong>{{ STAT_MAP['agility'] }}:</strong> {{ stats.agility }}</li>
+                <li><strong>{{ STAT_MAP['luck'] }}:</strong> {{ stats.luck }}</li>
             </ul>
-            <h4><span class="stat-icon">❤️</span> 繁育</h4>
+            <h4>繁育</h4>
             <ul>
                 <li><strong>剩余次数:</strong> {{ breeds_left }} / {{ nftData.breeding_limit }}</li>
                 <li><strong>繁育冷却:</strong> {{ breed_cooldown_left > 0 ? `${Math.ceil(breed_cooldown_left / 60)} 分钟` : '准备就绪' }}</li>
@@ -210,7 +294,7 @@ function handleBreed() {
       <template v-if="context === 'collection' && nft.data">
         
         <div class="action-form harvest-form">
-            <h4><span class="stat-icon">⛏️</span> 资源丰收</h4>
+            <h4>资源丰收</h4>
             <p class="help-text">收集该灵宠累积的 JCoin。冷却时间: 1 小时。</p>
             <form @submit.prevent="handleHarvest">
                 <button type="submit" :disabled="!can_harvest">
@@ -220,7 +304,7 @@ function handleBreed() {
         </div>
         
         <div class="action-form">
-            <h4><span class="stat-icon">🏋️</span> 灵宠训练</h4>
+            <h4>灵宠训练</h4>
             <p class="help-text">消耗 {{ formatCurrency(train_cost) }} FC 进行一次训练，获得 {{ XP_NEEDED_PER_LEVEL / 4 }} XP。</p>
             <form @submit.prevent="handleTrain">
                 <button type="submit" :disabled="!can_train">
@@ -230,7 +314,7 @@ function handleBreed() {
         </div>
         
         <div class="action-form breed-form" v-if="nftData.gender === 'Female'">
-            <h4><span class="stat-icon">❤️</span> 灵宠繁育</h4>
+            <h4>灵宠繁育</h4>
             <p class="help-text">
                 作为母亲，选择一只（同物种、非冷却中、有次数的）雄性灵宠进行繁育。
             </p>
@@ -240,7 +324,7 @@ function handleBreed() {
                     <select v-model="form.breed.selectedPartnerId" @click="fetchCompatiblePartners" required>
                         <option :value="null" disabled>-- {{ form.breed.isLoadingPartners ? '加载中...' : '选择伴侣' }} --</option>
                         <option v-for="p in form.breed.partners" :key="p.nft_id" :value="p.nft_id">
-                            {{ p.data.nickname }} (Lvl.{{ p.data.level }}, 剩余 {{ (p.data.breeding_limit || 0) - (p.data.breeding_count || 0) }} 次)
+                            {{ p.data.nickname }} (等级 {{ p.data.level }}, 剩余 {{ (p.data.breeding_limit || 0) - (p.data.breeding_count || 0) }} 次)
                         </option>
                          <option v-if="!form.breed.isLoadingPartners && form.breed.partners.length === 0" :value="null" disabled>
                             没有找到符合条件的伴侣
@@ -255,7 +339,7 @@ function handleBreed() {
         </div>
 
         <div class="action-form">
-            <h4><span class="stat-icon">✏️</span> 重命名</h4>
+            <h4>重命名</h4>
             <form @submit.prevent="handleRename" class="rename-form">
                 <div class="form-group">
                     <input type="text" v-model="form.rename.newName" placeholder="输入新的昵称" required maxlength="30" />
@@ -265,7 +349,7 @@ function handleBreed() {
         </div>
 
         <div class="action-form sell-form">
-          <h4><span class="stat-icon">🛒</span> 上架出售</h4>
+          <h4>上架出售</h4>
           <form @submit.prevent="handleListForSale">
             <div class="form-group"><label>描述</label><input type="text" v-model="form.list.description" required /></div>
             <div class="form-group">
@@ -351,6 +435,7 @@ function handleBreed() {
     font-weight: 500;
     margin-left: 0.5rem;
 }
+/* +++ Bug 3 修复: 稀有度样式 +++ */
 .rarity-common { background-color: #e2e8f0; color: #4a5568; }
 .rarity-uncommon { background-color: #c6f6d5; color: #2f855a; }
 .rarity-rare { background-color: #bee3f8; color: #2c5282; }
@@ -370,7 +455,7 @@ function handleBreed() {
     border-bottom: 1px solid #e2e8f0;
     padding-bottom: 0.5rem;
 }
-.stat-icon { display: inline-block; }
+/* .stat-icon { display: inline-block; } -- Bug 5: 移除 */
 .stat-group ul {
     list-style: none;
     padding: 0;
@@ -385,10 +470,7 @@ function handleBreed() {
     min-width: 60px;
     display: inline-block;
 }
-code.genes {
-    font-size: 0.8rem;
-    color: #718096;
-}
+/* code.genes 被移除 (Bug 4) */
 
 /* --- 动作表单 --- */
 .action-form {
