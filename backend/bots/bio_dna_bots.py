@@ -42,7 +42,7 @@ PET_BOT_CONFIG = {
 # --- 中文名 ---
 PET_CHINESE_NAMES = ["灵宠饲养员", "基因工程师", "生物学家", "宠物小精灵大师", "JCoin繁育专家"]
 
-def get_random_chinese_name() -> str:
+def get_random_chinese_name(bot_type: str = None) -> str:
     """获取一个随机中文名"""
     return random.choice(PET_CHINESE_NAMES)
 

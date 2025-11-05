@@ -85,13 +85,12 @@ def admin_create_bot(username: Optional[str], bot_type: str, initial_funds: Opti
             funds = initial_funds if initial_funds is not None else getattr(BotClass, 'DEFAULT_FUNDS', 1000.0)
             prob = action_probability if action_probability is not None else getattr(BotClass, 'DEFAULT_PROBABILITY', 0.1)
             if not username:
-                # 根据 bot_type 选择对应的命名函数
                 if bot_type == "PlanetCapitalistBot":
-                    username = get_planet_name()
+                    username = get_planet_name(bot_type) 
                 elif bot_type == "BIO_DNA_BOT":
-                    username = get_bio_dna_name()
+                    username = get_bio_dna_name(bot_type) 
                 else:
-                    username = f"Bot_{bot_type}" # 备用
+                    username = f"Bot_{bot_type}" 
                 counter = 1
                 base_username = username
                 while True:
