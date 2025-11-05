@@ -10,81 +10,6 @@ const props = defineProps({
 
 const emit = defineEmits(['action'])
 
-// --- V3: 扩展的异常信号中文映射 ---
-// (我们从 planet.py 复制这个映射)
-const ANOMALY_NAMES = {
-    "SIG_GEO_FLUX": "地质通量",
-    "SIG_WEAK_ENERGY": "微弱能量读数",
-    "SIG_FAINT_BIO": "模糊的生命信号",
-    "SIG_HIGH_ENERGY": "高频能量读数",
-    "SIG_COMPLEX_STRUCTURE": "复杂结构回波",
-    "SIG_DEEP_SCAN": "深层回音",
-    "SIG_OCEANIC_ANOMALY": "海洋异常",
-    "SIG_RHYTHMIC_PULSE": "有节律的电磁脉冲",
-    "SIG_PLANET_WIDE": "全球范围异常",
-    // 向下兼容旧的
-    "GEO_ACTIVITY": "异常地质活动",
-    "HIGH_ENERGY": "高频能量读数",
-    "BIO_SIGN": "微弱的生命信号",
-    "RHYTHMIC_PULSE": "有节律的电磁脉冲"
-}
-
-// +++ 核心修复：添加特质中文映射 +++
-const TRAIT_NAMES = {
-    "RES_ZERO_POINT": "零点能量场",
-    "RES_HEAVY_MINERAL": "超重力矿脉",
-    "RES_DIAMOND_RAIN": "钻石雨",
-    "RES_HELIUM_3": "氦-3富集",
-    "RES_SPICE": "异星香料",
-    "RES_ANTIMATTER": "反物质喷泉",
-    "RES_ADAMANTIUM": "艾德曼合金矿",
-    "RES_CRYONIUM": "氪冰矿",
-    "LIFE_SILICON": "硅基生命痕迹",
-    "LIFE_SENTIENT_PLANT": "感知植物群",
-    "LIFE_GAS_WHALE": "气态巨兽",
-    "LIFE_EXTREMEPHILE": "极端微生物",
-    "LIFE_PARADISE": "生物天堂",
-    "LIFE_KRAKEN": "深海巨妖",
-    "ART_ANCIENT_RUINS": "远古外星遗物",
-    "ART_SLEEPING_SHIP": "休眠的星际飞船",
-    "ART_UNSTABLE_PORTAL": "不稳定的传送门",
-    "ART_FORERUNNER_MAP": "先行者星图",
-    "ART_WORLD_ENGINE": "世界引擎",
-    "ART_DYSON_SPHERE_FRAG": "戴森球残片",
-    "ART_ORACLE": "神谕AI",
-    "WON_ETERNAL_STORM": "永恒风暴",
-    "WON_NATURAL_PULSAR": "天然脉冲星",
-    "WON_SKY_MIRROR": "天空之镜",
-    "WON_FLOATING_ISLES": "悬浮岛屿",
-    "WON_CRYSTAL_FOREST": "水晶森林",
-    "WON_TIME_ANOMALY": "时间泡",
-    "WON_GRAVITY_RIFT": "重力裂隙",
-    "DUD_HIGH_RADIATION": "高强度辐射",
-    "DUD_UNSTABLE_CRUST": "不稳定地壳",
-    "DUD_TOXIC_ATMOS": "剧毒大气",
-    "DUD_ROGUE_ASTEROIDS": "流氓小行星带",
-    "DUD_ANCIENT_PLAGUE": "远古瘟疫",
-    "DUD_VOID_ORGANISM": "虚空生物",
-    "DUD_LOST_COLONY": "失落的殖民地",
-    "DUD_NOTHING": "一无所获",
-    "RES_WATER_ICE": "丰富的水冰",
-    "RES_THOLINS": "泰坦有机S",
-    "LIFE_FUNGAL_WASTES": "真菌荒原",
-    "WON_AURORA": "强极光",
-    "WON_GIANT_VOLCANO": "超级火山",
-    "ART_CRASH_SITE": "飞船坠毁点",
-    "DUD_BARREN": "贫瘠之地",
-    "DUD_FALSE_ALARM": "虚假警报",
-    "RES_SILICATES": "硅酸盐岩石",
-    "WON_DEEP_CANYON": "大裂谷",
-    "LIFE_BACTERIA": "细菌菌落",
-    "ART_SATELLITE": "失控的人造卫星",
-    "DUD_MAGNETIC_FIELD": "异常磁场",
-    "RES_METHANE_LAKE": "甲烷湖",
-}
-// +++ 修复结束 +++
-
-
 // --- V3: 经济配置 (硬编码以匹配后端) ---
 const HARVEST_COOLDOWN_SECONDS = 4 * 3600;
 const SCAN_COST = 10.0;
@@ -123,14 +48,14 @@ const nftData = computed(() => props.nft.data || {})
 const economic_stats = computed(() => nftData.value.economic_stats || {})
 const rarity_score = computed(() => nftData.value.rarity_score || {})
 
-// +++ 核心修复：计算属性，用于翻译特质列表 +++
+
 const unlockedTraitNames = computed(() => {
   if (!nftData.value.unlocked_traits?.length) {
     return []
   }
+  // 注意：这里我们引用了外部 <script> 块中的 TRAIT_NAMES
   return nftData.value.unlocked_traits.map(traitId => TRAIT_NAMES[traitId] || traitId)
 })
-// +++ 修复结束 +++
 
 const jph = computed(() => economic_stats.value.total_jph || 0)
 const last_harvest_time = computed(() => nftData.value.last_harvest_time || 0)
@@ -199,6 +124,83 @@ const summaryHtml = computed(() => {
         </div>
     `
 })
+</script>
+
+<script>
+// --- V3: 扩展的异常信号中文映射 ---
+// (从 setup 移到这里)
+const ANOMALY_NAMES = {
+    "SIG_GEO_FLUX": "地质通量",
+    "SIG_WEAK_ENERGY": "微弱能量读数",
+    "SIG_FAINT_BIO": "模糊的生命信号",
+    "SIG_HIGH_ENERGY": "高频能量读数",
+    "SIG_COMPLEX_STRUCTURE": "复杂结构回波",
+    "SIG_DEEP_SCAN": "深层回音",
+    "SIG_OCEANIC_ANOMALY": "海洋异常",
+    "SIG_RHYTHMIC_PULSE": "有节律的电磁脉冲",
+    "SIG_PLANET_WIDE": "全球范围异常",
+    // 向下兼容旧的
+    "GEO_ACTIVITY": "异常地质活动",
+    "HIGH_ENERGY": "高频能量读数",
+    "BIO_SIGN": "微弱的生命信号",
+    "RHYTHMIC_PULSE": "有节律的电磁脉冲"
+}
+
+// 添加特质中文映射 +++
+const TRAIT_NAMES = {
+    "RES_ZERO_POINT": "零点能量场",
+    "RES_HEAVY_MINERAL": "超重力矿脉",
+    "RES_DIAMOND_RAIN": "钻石雨",
+    "RES_HELIUM_3": "氦-3富集",
+    "RES_SPICE": "异星香料",
+    "RES_ANTIMATTER": "反物质喷泉",
+    "RES_ADAMANTIUM": "艾德曼合金矿",
+    "RES_CRYONIUM": "氪冰矿",
+    "LIFE_SILICON": "硅基生命痕迹",
+    "LIFE_SENTIENT_PLANT": "感知植物群",
+    "LIFE_GAS_WHALE": "气态巨兽",
+    "LIFE_EXTREMEPHILE": "极端微生物",
+    "LIFE_PARADISE": "生物天堂",
+    "LIFE_KRAKEN": "深海巨妖",
+    "ART_ANCIENT_RUINS": "远古外星遗物",
+    "ART_SLEEPING_SHIP": "休眠的星际飞船",
+    "ART_UNSTABLE_PORTAL": "不稳定的传送门",
+    "ART_FORERUNNER_MAP": "先行者星图",
+    "ART_WORLD_ENGINE": "世界引擎",
+    "ART_DYSON_SPHERE_FRAG": "戴森球残片",
+    "ART_ORACLE": "神谕AI",
+    "WON_ETERNAL_STORM": "永恒风暴",
+    "WON_NATURAL_PULSAR": "天然脉冲星",
+    "WON_SKY_MIRROR": "天空之镜",
+    "WON_FLOATING_ISLES": "悬浮岛屿",
+    "WON_CRYSTAL_FOREST": "水晶森林",
+    "WON_TIME_ANOMALY": "时间泡",
+    "WON_GRAVITY_RIFT": "重力裂隙",
+    "DUD_HIGH_RADIATION": "高强度辐射",
+    "DUD_UNSTABLE_CRUST": "不稳定地壳",
+    "DUD_TOXIC_ATMOS": "剧毒大气",
+    "DUD_ROGUE_ASTEROIDS": "流氓小行星带",
+    "DUD_ANCIENT_PLAGUE": "远古瘟疫",
+    "DUD_VOID_ORGANISM": "虚空生物",
+    "DUD_LOST_COLONY": "失落的殖民地",
+    "DUD_NOTHING": "一无所获",
+    "RES_WATER_ICE": "丰富的水冰",
+    "RES_THOLINS": "泰坦有机S",
+    "LIFE_FUNGAL_WASTES": "真菌荒原",
+    "WON_AURORA": "强极光",
+    "WON_GIANT_VOLCANO": "超级火山",
+    "ART_CRASH_SITE": "飞船坠毁点",
+    "DUD_BARREN": "贫瘠之地",
+    "DUD_FALSE_ALARM": "虚假警报",
+    "RES_SILICATES": "硅酸盐岩石",
+    "WON_DEEP_CANYON": "大裂谷",
+    "LIFE_BACTERIA": "细菌菌落",
+    "ART_SATELLITE": "失控的人造卫星",
+    "DUD_MAGNETIC_FIELD": "异常磁场",
+    "RES_METHANE_LAKE": "甲烷湖",
+}
+
+// 必须放在常规 <script> 块中才能具名导出
 export function getSearchableText(data) {
   if (!data) return '';
   const traits = (data.unlocked_traits || []).map(id => TRAIT_NAMES[id] || '');

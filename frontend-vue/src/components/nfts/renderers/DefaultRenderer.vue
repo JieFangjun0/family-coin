@@ -20,6 +20,10 @@ const summaryHtml = computed(() => {
         </div>
     `
 })
+</script>
+
+<script>
+// 必须放在常规 <script> 块中才能具名导出
 export function getSearchableText(data) {
   // 默认渲染器只依赖 MyCollectionView 中的通用搜索
   return ''; 

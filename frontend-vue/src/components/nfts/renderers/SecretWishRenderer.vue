@@ -83,10 +83,55 @@ function handleDestroy() {
     emit('action', 'destroy', {})
 }
 
+</script>
+
+<script>
+// +++ 修复: 将所有用于导出的常量移至此常规 <script> 块 +++
+const RARITY_MAP = {
+    "COMMON": "普通",
+    "UNCOMMON": "罕见",
+    "RARE": "稀有",
+    "MYTHIC": "神话"
+}
+const GENDER_MAP = {
+    "Male": "雄性",
+    "Female": "雌性"
+}
+const PERSONALITY_MAP = {
+    "Timid": "胆小", "Brave": "勇敢", "Goofy": "滑稽", "Calm": "冷静", 
+    "Lazy": "懒惰", "Hyper": "活泼", "Serious": "严肃", "Elegant": "优雅"
+}
+const STAT_MAP = {
+    "vitality": "活力",
+    "spirit": "精神",
+    "agility": "敏捷",
+    "luck": "幸运"
+}
+const GENE_TYPE_MAP = {
+    "COLOR": "颜色",
+    "PATTERN": "花纹",
+    "AURA": "光环"
+}
+// 基因表现型（值）的翻译
+const GENE_VALUE_MAP = {
+    "Red": "红色", "White": "白色", "Black": "黑色", "Yellow": "黄色",
+    "Blue": "蓝色", "Green": "绿色", "Purple": "紫色", "Silver": "银色",
+    "Solid": "纯色", "Stripes": "条纹", "Spots": "斑点", "None": "无",
+    "Sparkle": "闪耀", "Glow": "辉光", "Shadow": "暗影"
+}
+
+// 必须放在常规 <script> 块中才能具名导出
 export function getSearchableText(data) {
   if (!data) return '';
-  // 允许用户搜索自己的秘密内容（仅在收藏视图中）
-  return [data.description, data.content].join(' ');
+  const visible = data.visible_traits || {};
+  return [
+    data.species_name,
+    GENDER_MAP[data.gender] || '',
+    PERSONALITY_MAP[data.personality] || '',
+    GENE_VALUE_MAP[visible.color] || '',
+    GENE_VALUE_MAP[visible.pattern] || '',
+    GENE_VALUE_MAP[visible.aura] || '',
+  ].join(' ');
 }
 </script>
 

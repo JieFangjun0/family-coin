@@ -220,17 +220,14 @@ function handleBreed() {
   emit('action', 'breed', { partner_nft_id: form.breed.selectedPartnerId })
 }
 
+</script>
+
+<script>
+// 必须放在常规 <script> 块中才能具名导出
 export function getSearchableText(data) {
   if (!data) return '';
-  const visible = data.visible_traits || {};
-  return [
-    data.species_name,
-    GENDER_MAP[data.gender] || '',
-    PERSONALITY_MAP[data.personality] || '',
-    GENE_VALUE_MAP[visible.color] || '',
-    GENE_VALUE_MAP[visible.pattern] || '',
-    GENE_VALUE_MAP[visible.aura] || '',
-  ].join(' ');
+  // 允许用户搜索自己的秘密内容（仅在收藏视图中）
+  return [data.description, data.content].join(' ');
 }
 </script>
 
