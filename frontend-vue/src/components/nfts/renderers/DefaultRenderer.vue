@@ -20,6 +20,10 @@ const summaryHtml = computed(() => {
         </div>
     `
 })
+export function getSearchableText(data) {
+  // 默认渲染器只依赖 MyCollectionView 中的通用搜索
+  return ''; 
+}
 </script>
 
 <template>

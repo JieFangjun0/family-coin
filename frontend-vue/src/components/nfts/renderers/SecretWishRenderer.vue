@@ -83,6 +83,11 @@ function handleDestroy() {
     emit('action', 'destroy', {})
 }
 
+export function getSearchableText(data) {
+  if (!data) return '';
+  // 允许用户搜索自己的秘密内容（仅在收藏视图中）
+  return [data.description, data.content].join(' ');
+}
 </script>
 
 <template>

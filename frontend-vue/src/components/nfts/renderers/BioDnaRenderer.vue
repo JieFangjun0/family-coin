@@ -220,6 +220,18 @@ function handleBreed() {
   emit('action', 'breed', { partner_nft_id: form.breed.selectedPartnerId })
 }
 
+export function getSearchableText(data) {
+  if (!data) return '';
+  const visible = data.visible_traits || {};
+  return [
+    data.species_name,
+    GENDER_MAP[data.gender] || '',
+    PERSONALITY_MAP[data.personality] || '',
+    GENE_VALUE_MAP[visible.color] || '',
+    GENE_VALUE_MAP[visible.pattern] || '',
+    GENE_VALUE_MAP[visible.aura] || '',
+  ].join(' ');
+}
 </script>
 
 <template>

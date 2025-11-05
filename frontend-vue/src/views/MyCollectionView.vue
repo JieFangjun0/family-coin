@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
 import NftCard from '@/components/nfts/NftCard.vue'
-
+import { nftRendererRegistry, defaultRenderer } from '@/components/nfts/renderer-registry.js'
 const authStore = useAuthStore()
 const nfts = ref([])
 const isLoading = ref(true)
@@ -50,33 +50,47 @@ async function fetchNfts() {
   isLoading.value = false
 }
 
-// +++ 核心修改：新增本地过滤的计算属性（解耦方式：字符串化搜索） +++
+// 本地过滤的计算属性（解耦方式：字符串化搜索） +++
 const filteredNfts = computed(() => {
     const term = searchTerm.value.toLowerCase().trim()
     if (!term) return nfts.value
     
     return nfts.value.filter(nft => {
         const data = nft.data || {}
-        // 1. 藏品 元数据
-        let searchableText = nft.nft_type.toLowerCase() + ' ';
-        searchableText += (nftDisplayNames.value[nft.nft_type] || '').toLowerCase() + ' ';
-        searchableText += (nft.nft_id || '').substring(0, 8).toLowerCase() + ' ';
-
-        // 2. 将整个 data 对象（包含所有如 planet_type 的内部字段）字符串化进行搜索
-        // 这是最解耦的本地搜索方法
-        try {
-            searchableText += JSON.stringify(data).toLowerCase();
-        } catch (e) {
-            // 如果 JSON 字符串化失败，尝试搜索已知的通用字段
-            searchableText += (data.custom_name || '').toLowerCase() + ' ';
-            searchableText += (data.name || '').toLowerCase() + ' ';
-            searchableText += (data.description || '').toLowerCase() + ' ';
-        }
         
-        return searchableText.includes(term)
+        // 1. 获取特定类型的搜索函数
+        // 如果未在注册表中找到，则使用 defaultRenderer 的函数
+        const handler = nftRendererRegistry[nft.nft_type] || defaultRenderer
+        const getSpecificSearchText = handler.getSearchableText
+        
+        // 2. 构建可搜索文本
+        const searchableText = [
+            // A. 通用文本 (所有 NFT 都有的)
+            nft.nft_type,
+            (nftDisplayNames.value[nft.nft_type] || ''), // NFT类型中文名
+            nft.nft_id.substring(0, 8),
+            
+            // B. Data 中的通用字段 (约定俗成的)
+            data.custom_name, // (例如 Planet 的)
+            data.name, // (例如 Default 的)
+            data.description, // (例如 SecretWish 的)
+            data.nickname, // (例如 BioDna 的)
+            data.species_name, // (例如 BioDna 的)
+            
+            // C. (核心) 调用特定渲染器的函数，获取翻译后的文本
+            getSpecificSearchText(data) 
+        ]
+        .filter(Boolean) // 移除空值 (null, undefined, '')
+        .join(' ')
+        .toLowerCase();
+        
+        // D. (回退) 添加原始 JSON 字符串以防万一
+        const rawDataString = JSON.stringify(data).toLowerCase();
+
+        // 3. 执行搜索 (在组合文本或原始数据中查找)
+        return searchableText.includes(term) || rawDataString.includes(term)
     })
 })
-// +++ 核心修改结束 +++
 
 
 // --- 修复问题 3: 更新 Computed 属性以使用过滤后的列表 ---

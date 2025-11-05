@@ -199,6 +199,18 @@ const summaryHtml = computed(() => {
         </div>
     `
 })
+export function getSearchableText(data) {
+  if (!data) return '';
+  const traits = (data.unlocked_traits || []).map(id => TRAIT_NAMES[id] || '');
+  const anomalies = (data.anomalies || []).map(id => ANOMALY_NAMES[id] || '');
+  return [
+    data.planet_type, 
+    data.stellar_class, 
+    data.custom_name, 
+    ...traits, 
+    ...anomalies
+  ].join(' ');
+}
 </script>
 
 <template>
