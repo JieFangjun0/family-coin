@@ -315,7 +315,7 @@ def respond_to_seek_offer(seeker_key: str, offer_id: str, accept: bool) -> (bool
             conn.rollback()
             return False, f"处理报价失败: {e}"
 
-def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
+def get_market_listings(listing_type: str, exclude_owner: str = None, search_term: str = None) -> list:
     """获取市场上的所有挂单。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -337,6 +337,13 @@ def get_market_listings(listing_type: str, exclude_owner: str = None) -> list:
         if exclude_owner:
             query += " AND l.lister_key != ?"
             params.append(exclude_owner)
+            
+        # +++ 核心修改: 添加搜索条件 +++
+        if search_term:
+            query += " AND l.description LIKE ?"
+            params.append(f"%{search_term}%")
+        # +++ 核心修改结束 +++
+        
         query += " ORDER BY l.created_at DESC"
         cursor.execute(query, params)
         

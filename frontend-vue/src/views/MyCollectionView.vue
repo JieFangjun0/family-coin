@@ -14,6 +14,9 @@ const successMessage = ref(null)
 // --- 修复问题 3: 新增状态 ---
 const activeTab = ref(null)
 const nftDisplayNames = ref({})
+// +++ 核心修改：新增搜索状态 +++
+const searchTerm = ref('')
+// +++ 核心修改结束 +++
 // --- 修复结束 ---
 
 async function fetchNfts() {
@@ -47,18 +50,49 @@ async function fetchNfts() {
   isLoading.value = false
 }
 
-// --- 修复问题 3: 新增 Computed 属性用于分组 ---
+// +++ 核心修改：新增本地过滤的计算属性（解耦方式：字符串化搜索） +++
+const filteredNfts = computed(() => {
+    const term = searchTerm.value.toLowerCase().trim()
+    if (!term) return nfts.value
+    
+    return nfts.value.filter(nft => {
+        const data = nft.data || {}
+        // 1. NFT 元数据
+        let searchableText = nft.nft_type.toLowerCase() + ' ';
+        searchableText += (nftDisplayNames.value[nft.nft_type] || '').toLowerCase() + ' ';
+        searchableText += (nft.nft_id || '').substring(0, 8).toLowerCase() + ' ';
+
+        // 2. 将整个 data 对象（包含所有如 planet_type 的内部字段）字符串化进行搜索
+        // 这是最解耦的本地搜索方法
+        try {
+            searchableText += JSON.stringify(data).toLowerCase();
+        } catch (e) {
+            // 如果 JSON 字符串化失败，尝试搜索已知的通用字段
+            searchableText += (data.custom_name || '').toLowerCase() + ' ';
+            searchableText += (data.name || '').toLowerCase() + ' ';
+            searchableText += (data.description || '').toLowerCase() + ' ';
+        }
+        
+        return searchableText.includes(term)
+    })
+})
+// +++ 核心修改结束 +++
+
+
+// --- 修复问题 3: 更新 Computed 属性以使用过滤后的列表 ---
 const nftsByType = computed(() => {
   const groups = {}
-  for (const nft of nfts.value) {
+  // 核心：使用过滤后的列表进行分组
+  for (const nft of filteredNfts.value) { 
     if (!groups[nft.nft_type]) {
       groups[nft.nft_type] = []
     }
     groups[nft.nft_type].push(nft)
   }
   // 自动设置激活的 tab
-  if (activeTab.value === null && Object.keys(groups).length > 0) {
-    activeTab.value = Object.keys(groups).sort()[0]
+  const sortedKeys = Object.keys(groups).sort()
+  if (activeTab.value === null || !sortedKeys.includes(activeTab.value)) {
+    activeTab.value = sortedKeys.length > 0 ? sortedKeys[0] : null
   }
   return groups
 })
@@ -165,12 +199,18 @@ onMounted(fetchNfts)
     <div v-if="isLoading" class="loading-state">正在加载...</div>
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
     <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
-
+    
+    <div class="search-bar">
+      <input type="text" v-model="searchTerm" placeholder="搜索 NFT 名称、描述、类型或 ID..." />
+    </div>
     <div v-if="!isLoading && nfts.length === 0" class="empty-state">
       你的收藏是空的。快去商店铸造或购买一些吧！
     </div>
 
-    <div v-if="!isLoading && nfts.length > 0">
+    <div v-if="!isLoading && filteredNfts.length === 0 && nfts.length > 0" class="empty-state">
+        没有找到与 “{{ searchTerm }}” 匹配的 NFT。
+    </div>
+    <div v-if="!isLoading && filteredNfts.length > 0">
       <div class="tabs" v-if="sortedNftTypes.length > 1">
         <button
           v-for="nftType in sortedNftTypes"
@@ -232,6 +272,23 @@ onMounted(fetchNfts)
   to { opacity: 1; }
 }
 /* --- 修复结束 --- */
+
+/* +++ 核心修改：新增搜索栏样式 +++ */
+.search-bar {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.search-bar input {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 6px;
+    border: 1px solid #cbd5e0;
+    box-sizing: border-box;
+}
+/* +++ 核心修改结束 +++ */
 
 
 .nft-grid {

@@ -35,6 +35,10 @@ const activeAuctionTab = ref(null)
 const activeSeekTab = ref(null)
 // +++ 修复结束 +++
 
+// +++ 核心修改：新增搜索状态 +++
+const searchTerm = ref('')
+// +++ 核心修改结束 +++
+
 
 // --- 表单 ---
 const mintForms = ref({})
@@ -153,6 +157,9 @@ function translateStatus(status) { return STATUS_MAP[status] || status }
 
 async function fetchDataForTab(tab) {
   errorMessage.value = null;
+  // +++ 核心修改：获取搜索词 +++
+  const currentSearchTerm = searchTerm.value;
+  // +++ 核心修改结束 +++
   switch (tab) {
     case 'mint':
       if (Object.keys(creatableNfts.value).length === 0) {
@@ -161,19 +168,19 @@ async function fetchDataForTab(tab) {
       break;
     case 'buy':
       await Promise.all([
-        fetchSaleListings(),
+        fetchSaleListings(currentSearchTerm), // <-- Pass search term
         fetchAllNftTypes()
       ]);
       break;
     case 'auction': 
       await Promise.all([
-        fetchAuctionListings(),
+        fetchAuctionListings(currentSearchTerm), // <-- Pass search term
         fetchAllNftTypes()
       ]);
       break;
     case 'seek': 
       await Promise.all([
-        fetchSeekListings(),
+        fetchSeekListings(currentSearchTerm), // <-- Pass search term
         fetchAllNftTypes(),
         fetchMyNfts()
       ]);
@@ -181,7 +188,7 @@ async function fetchDataForTab(tab) {
     case 'my-listings':
       await Promise.all([
         fetchMyActivity(),
-        fetchAllNftTypes() // 确保我的交易页也能显示中文
+        fetchAllNftTypes()
       ]);
       break;
   }
@@ -217,22 +224,32 @@ async function fetchCreatableNfts() {
   isLoading.value.mint = false
 }
 
-async function fetchSaleListings() {
+// +++ 核心修改：更新 fetchSaleListings 以接受搜索词 +++
+async function fetchSaleListings(search_term = null) {
   isLoading.value.buy = true
-  activeBuyTab.value = null // 重置tab
+  activeBuyTab.value = null 
+  const params = { listing_type: 'SALE' }
+  if (search_term) {
+      params.search_term = search_term
+  }
   const [data, error] = await apiCall('GET', '/market/listings', {
-    params: { listing_type: 'SALE' }
+    params: params // <-- Use updated params
   })
   if (error) errorMessage.value = `无法加载在售列表: ${error}`
   else saleListings.value = data.listings
   isLoading.value.buy = false
 }
 
-async function fetchAuctionListings() {
+// +++ 核心修改：更新 fetchAuctionListings 以接受搜索词 +++
+async function fetchAuctionListings(search_term = null) {
   isLoading.value.auction = true
-  activeAuctionTab.value = null // 重置tab
+  activeAuctionTab.value = null 
+  const params = { listing_type: 'AUCTION' }
+  if (search_term) {
+      params.search_term = search_term
+  }
   const [data, error] = await apiCall('GET', '/market/listings', {
-    params: { listing_type: 'AUCTION' }
+    params: params // <-- Use updated params
   })
   if (error) {
     errorMessage.value = `无法加载拍卖列表: ${error}`
@@ -247,11 +264,16 @@ async function fetchAuctionListings() {
   isLoading.value.auction = false
 }
 
-async function fetchSeekListings() {
+// +++ 核心修改：更新 fetchSeekListings 以接受搜索词 +++
+async function fetchSeekListings(search_term = null) {
   isLoading.value.seek = true
-  activeSeekTab.value = null // 重置tab
+  activeSeekTab.value = null 
+  const params = { listing_type: 'SEEK' }
+  if (search_term) {
+      params.search_term = search_term
+  }
   const [data, error] = await apiCall('GET', '/market/listings', {
-    params: { listing_type: 'SEEK' }
+    params: params // <-- Use updated params
   })
   if (error) {
     errorMessage.value = `无法加载求购列表: ${error}`
@@ -307,6 +329,15 @@ function selectTab(tab) {
   activeTab.value = tab
   fetchDataForTab(tab)
 }
+
+// +++ 核心修改：新增搜索触发函数 +++
+function handleSearch() {
+  if (activeTab.value === 'buy' || activeTab.value === 'auction' || activeTab.value === 'seek') {
+    // 强制重新加载当前激活的市场标签页数据
+    fetchDataForTab(activeTab.value)
+  }
+}
+// +++ 核心修改结束 +++
 
 async function handleMintNft(nftType, config) {
   // (此函数无修改)
@@ -575,6 +606,15 @@ onMounted(() => {
       <button :class="{ active: activeTab === 'my-listings' }" @click="selectTab('my-listings')">我的交易</button>
     </div>
 
+    <div 
+        v-if="activeTab !== 'mint' && activeTab !== 'my-listings'"
+        class="search-bar"
+    >
+        <form @submit.prevent="handleSearch">
+            <input type="text" v-model="searchTerm" placeholder="搜索挂单描述 (例如: 稀有行星, 秘密愿望...)" />
+            <button type="submit">搜索</button>
+        </form>
+    </div>
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
     <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
 
@@ -1010,6 +1050,27 @@ onMounted(() => {
   to { opacity: 1; }
 }
 /* +++ 修复结束 +++ */
+
+/* +++ 核心修改：新增搜索栏样式 +++ */
+.search-bar {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.search-bar form { 
+    display: flex; 
+    gap: 1rem; 
+}
+.search-bar input { 
+    flex-grow: 1; 
+    padding: 0.75rem; 
+    border-radius: 6px; 
+    border: 1px solid #cbd5e0; 
+    box-sizing: border-box;
+}
+/* +++ 核心修改结束 +++ */
 
 
 .loading-state, .empty-state { text-align: center; padding: 3rem; color: #718096; font-size: 1.1rem; }

@@ -17,8 +17,12 @@ from backend.db import queries_user
 router = APIRouter()
 
 @router.get("/listings", tags=["Market"])
-def api_get_market_listings(listing_type: str, exclude_owner: str = None):
-    items = queries_market.get_market_listings(listing_type=listing_type, exclude_owner=exclude_owner)
+def api_get_market_listings(listing_type: str, exclude_owner: str = None, search_term: str = None): # <-- 核心修改: 添加 search_term
+    items = queries_market.get_market_listings(
+        listing_type=listing_type, 
+        exclude_owner=exclude_owner,
+        search_term=search_term # <-- 传递 search_term
+    )
     # 注意：get_market_listings 内部已经处理了 trade_description
     return {"listings": items}
 
