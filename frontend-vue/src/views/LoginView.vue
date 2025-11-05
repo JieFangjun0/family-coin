@@ -71,8 +71,8 @@ async function handleLogin() {
     </ul>
   </div>
   <p class="disclaimer">
-      JCoin 仅供娱乐。所有数字资产和“JCoin”均为虚拟道具，不具有任何真实世界价值。请理性参与。
-    </p>
+      JCoin 仅供站长个人学习与实验。所有数字资产和“JCoin”均为虚拟道具，不具有任何真实价值。请理性参与。
+    </p> 
     <form @submit.prevent="handleLogin" class="login-form">
       <div class="form-group">
         <label for="username">用户名或UID</label>

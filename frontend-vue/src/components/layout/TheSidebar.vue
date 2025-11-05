@@ -45,8 +45,8 @@ const navItems = [
   { name: '我的钱包', routeName: 'wallet', icon: IconWallet },
   { name: '转账', routeName: 'transfer', icon: IconTransfer },
   { name: '邀请', routeName: 'invitations', icon: IconInvite },
-  { name: '商店', routeName: 'shop', icon: IconShop },
-  { name: '我的NFT', routeName: 'collection', icon: IconCollection },
+  { name: '市场', routeName: 'shop', icon: IconShop },
+  { name: '我的藏品', routeName: 'collection', icon: IconCollection },
   { name: '社区', routeName: 'community', icon: IconCommunity },
   { name: '好友', routeName: 'friends', icon: IconFriends },
   { name: '个人展示主页', routeName: 'profile', icon: IconProfile },
@@ -224,6 +224,7 @@ onUnmounted(() => {
   flex-direction: column;
   flex-shrink: 0;
   transition: transform 0.3s ease-in-out;
+  overflow-y: auto;
 }
 .sidebar-logo {
   width: 24px;
