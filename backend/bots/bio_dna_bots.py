@@ -282,36 +282,53 @@ class BioDnaBot(BaseBot):
                 return
 
     async def _action_manage_portfolio(self, my_unlisted_pets: list, balance: float) -> float:
-        """(交易) 基于内在价值进行买卖"""
+        """(交易) 基于内在价值进行买卖和拍卖 (V2 逻辑)"""
         
-        market_listings = await self.client.get_market_listings("SALE")
-        pet_listings = [
-            item for item in market_listings 
+        # --- 同时获取拍卖和销售列表 ---
+        sale_listings_raw = await self.client.get_market_listings("SALE")
+        auction_listings_raw = await self.client.get_market_listings("AUCTION")
+        
+        pet_sales = [
+            item for item in sale_listings_raw 
             if item['nft_type'] == 'BIO_DNA' and item.get('nft_data')
         ]
-        
-        # 1. 卖出 (清算库存)
-        if my_unlisted_pets:
+        pet_auctions = [
+            item for item in auction_listings_raw
+            if item['nft_type'] == 'BIO_DNA' and item.get('nft_data')
+        ]
+
+        # 1. 卖出 (清算库存，支持一口价或拍卖)
+        if my_unlisted_pets and random.random() < 0.5: # 50%概率本回合卖东西
             pet_to_sell = random.choice(my_unlisted_pets)
             data = pet_to_sell.get('data', {})
             name = data.get('nickname') or data.get('species_name') or "灵宠"
-            
             value = self.calculate_pet_value(data)
-            sale_price = round(max(PET_BOT_CONFIG["MIN_LISTING_PRICE"], value * self.config["SALE_PROFIT_MARGIN"]), 2)
-            
-            desc = f"【专家培育】Lv.{data.get('level',1)} {name} [估值 {value:.0f}]"
-            self.log(f"正在出售 {name} (内在价值 {value:.2f} FC)，挂单价 {sale_price:.2f} FC", "LIST_SALE")
-            await self.client.create_listing(pet_to_sell['nft_id'], "BIO_DNA", sale_price, desc, "SALE")
+
+            # --- 随机选择拍卖或销售 ---
+            if random.random() < 0.3: # 30% 几率拍卖
+                listing_type = "AUCTION"
+                auction_hours = random.uniform(1, 4)
+                sale_price = round(max(1.0, value * 0.5), 2)
+                desc = f"【稀有拍卖】Lv.{data.get('level',1)} {name} [估值 {value:.0f}]"
+                self.log(f"正在拍卖 {name} (内在价值 {value:.2f} FC)，起拍价 {sale_price:.2f} FC", "LIST_AUCTION")
+            else: # 70% 几率一口价
+                listing_type = "SALE"
+                auction_hours = None
+                sale_price = round(max(PET_BOT_CONFIG["MIN_LISTING_PRICE"], value * self.config["SALE_PROFIT_MARGIN"]), 2)
+                desc = f"【专家培育】Lv.{data.get('level',1)} {name} [估值 {value:.0f}]"
+                self.log(f"正在出售 {name} (内在价值 {value:.2f} FC)，挂单价 {sale_price:.2f} FC", "LIST_SALE")
+
+            await self.client.create_listing(
+                pet_to_sell['nft_id'], "BIO_DNA", sale_price, desc, 
+                listing_type, auction_hours
+            )
 
         # 2. 买入 (抄底)
         bargains = []
-        for item in pet_listings:
+        for item in pet_sales:
             price = item.get('price')
-            if price > balance:
-                continue
-                
+            if price > balance: continue
             value = self.calculate_pet_value(item.get('nft_data', {}))
-            
             if price < (value * self.config["BUY_DISCOUNT_THRESHOLD"]):
                 bargains.append(item)
         
@@ -319,16 +336,34 @@ class BioDnaBot(BaseBot):
             item_to_buy = random.choice(bargains)
             price = item_to_buy['price']
             value = self.calculate_pet_value(item_to_buy.get('nft_data', {}))
-            
-            self.log(f"👉 抄底！发现 {item_to_buy['description']} 售价 {price:.2f} FC "
+            self.log(f"👉 抄底 (一口价)！发现 {item_to_buy['description']} 售价 {price:.2f} FC "
                      f"(内在价值 {value:.2f})，立即买入！", "MARKET_BUY")
             success, detail = await self.client.buy_item(item_to_buy['listing_id'])
+            if success: return balance - price
+
+        # 3. 竞拍 (捡漏)
+        auction_bargains = []
+        for item in pet_auctions:
+            current_bid = item.get('highest_bid') or item.get('price')
+            if current_bid > balance: continue
             
-            if success:
-                self.log(f"抄底成功: {detail}", "MARKET_BUY_SUCCESS")
-                return balance - price
-            else:
-                self.log(f"抄底失败: {detail}", "MARKET_BUY_FAIL")
+            value = self.calculate_pet_value(item.get('nft_data', {}))
+            if current_bid < (value * self.config["BUY_DISCOUNT_THRESHOLD"]):
+                auction_bargains.append((item, value, current_bid))
+        
+        if auction_bargains:
+            item_to_bid, value, current_bid = random.choice(auction_bargains)
+            my_max_bid = value * self.config["BUY_DISCOUNT_THRESHOLD"]
+            new_bid_amount = round(min(my_max_bid, current_bid * 1.05 + 1.0), 2)
+
+            if new_bid_amount > balance:
+                self.log(f"发现拍卖品 {item_to_bid['description']} 值得竞拍，但余额不足以出价 {new_bid_amount:.2f} FC", "INFO")
+            elif new_bid_amount > current_bid:
+                self.log(f"👉 竞拍！发现 {item_to_bid['description']} 现价 {current_bid:.2f} FC "
+                         f"(内在价值 {value:.2f})，出价 {new_bid_amount:.2f} FC！", "MARKET_BID")
+                success, detail = await self.client.place_bid(item_to_bid['listing_id'], new_bid_amount)
+                if success:
+                    return balance - new_bid_amount
         
         return balance
 

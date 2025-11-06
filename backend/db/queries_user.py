@@ -6,7 +6,6 @@ import sqlite3
 from typing import Optional, List
 from werkzeug.security import generate_password_hash, check_password_hash
 from shared.crypto_utils import verify_signature, generate_key_pair
-
 from backend.db.database import (
     LEDGER_LOCK, get_db_connection, _create_system_transaction,
     _generate_uid, _generate_secure_password, get_setting,
@@ -313,11 +312,16 @@ def process_transaction(
     if from_key == to_key: return False, "不能给自己转账"
     
     try:
+        # 1. 验证消息格式和内容 (这一步是正确的)
         message = json.loads(message_json)
+        if message.get('from_key') != from_key or message.get('to_key') != to_key:
+            return False, "消息体与参数不匹配"
     except json.JSONDecodeError:
         return False, "无效的消息格式"
 
-    if not verify_signature(from_key, message, signature): return False, "签名无效"
+    # 2. 验证签名时，必须使用原始的 message_json 字符串，而不是重新解析的 message 字典
+    if not verify_signature(from_key, message_json, signature): return False, "签名无效"
+
     if (time.time() - message.get('timestamp', 0)) > 300: return False, "交易已过期"
 
     with LEDGER_LOCK, get_db_connection() as conn:

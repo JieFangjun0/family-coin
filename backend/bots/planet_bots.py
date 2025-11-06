@@ -201,38 +201,54 @@ class PlanetCapitalistBot(BaseBot):
         return balance
 
     async def _action_manage_portfolio(self, my_unlisted_planets: list, balance: float) -> float:
-        """(交易) 基于内在价值进行买卖"""
+        """(交易) 基于内在价值进行买卖和拍卖 (V2 逻辑)"""
         
-        market_listings = await self.client.get_market_listings("SALE")
-        planet_listings = [
-            item for item in market_listings 
+        # --- 同时获取拍卖和销售列表 ---
+        sale_listings_raw = await self.client.get_market_listings("SALE")
+        auction_listings_raw = await self.client.get_market_listings("AUCTION")
+        
+        planet_sales = [
+            item for item in sale_listings_raw 
+            if item['nft_type'] == 'PLANET' and item.get('nft_data')
+        ]
+        planet_auctions = [
+            item for item in auction_listings_raw 
             if item['nft_type'] == 'PLANET' and item.get('nft_data')
         ]
         
-        # 1. 卖出 (清算库存)
-        if my_unlisted_planets:
+        # 1. 卖出 (清算库存，支持一口价或拍卖)
+        if my_unlisted_planets and random.random() < 0.5: # 50%概率本回合卖东西
             nft_to_sell = random.choice(my_unlisted_planets)
             data = nft_to_sell.get('data', {})
             name = data.get('custom_name') or data.get('planet_type') or "行星"
-            
-            # --- 核心：基于价值定价 ---
             value = self.calculate_planet_value(data)
-            sale_price = round(max(CAPITALIST_CONFIG["MIN_LISTING_PRICE"], value * self.config["SALE_PROFIT_MARGIN"]), 2)
-            
-            desc = f"【资本家精选】{name} [估值 {value:.0f} | 稀有度 {data.get('rarity_score',{}).get('total',0)}]"
-            self.log(f"正在出售 {name} (内在价值 {value:.2f} FC)，挂单价 {sale_price:.2f} FC", "LIST_SALE")
-            await self.client.create_listing(nft_to_sell['nft_id'], "PLANET", sale_price, desc, "SALE")
+
+            # --- 随机选择拍卖或销售 ---
+            if random.random() < 0.3: # 30% 几率拍卖
+                listing_type = "AUCTION"
+                auction_hours = random.uniform(1, 4) # 1-4 小时拍卖
+                # 起拍价为估值的 50%，最低为 1 FC
+                sale_price = round(max(1.0, value * 0.5), 2)
+                desc = f"【稀有拍卖】{name} [估值 {value:.0f}] - 快速拍卖！"
+                self.log(f"正在拍卖 {name} (内在价值 {value:.2f} FC)，起拍价 {sale_price:.2f} FC", "LIST_AUCTION")
+            else: # 70% 几率一口价
+                listing_type = "SALE"
+                auction_hours = None
+                sale_price = round(max(CAPITALIST_CONFIG["MIN_LISTING_PRICE"], value * self.config["SALE_PROFIT_MARGIN"]), 2)
+                desc = f"【资本家精选】{name} [估值 {value:.0f} | 稀有度 {data.get('rarity_score',{}).get('total',0)}]"
+                self.log(f"正在出售 {name} (内在价值 {value:.2f} FC)，挂单价 {sale_price:.2f} FC", "LIST_SALE")
+
+            await self.client.create_listing(
+                nft_to_sell['nft_id'], "PLANET", sale_price, desc, 
+                listing_type, auction_hours
+            )
 
         # 2. 买入 (抄底)
         bargains = []
-        for item in planet_listings:
+        for item in planet_sales:
             price = item.get('price')
-            if price > balance:
-                continue
-                
+            if price > balance: continue
             value = self.calculate_planet_value(item.get('nft_data', {}))
-            
-            # --- 核心：基于价值购买 ---
             if price < (value * self.config["BUY_DISCOUNT_THRESHOLD"]):
                 bargains.append(item)
         
@@ -240,16 +256,37 @@ class PlanetCapitalistBot(BaseBot):
             item_to_buy = random.choice(bargains)
             price = item_to_buy['price']
             value = self.calculate_planet_value(item_to_buy.get('nft_data', {}))
-            
-            self.log(f"👉 抄底！发现 {item_to_buy['description']} 售价 {price:.2f} FC "
+            self.log(f"👉 抄底 (一口价)！发现 {item_to_buy['description']} 售价 {price:.2f} FC "
                      f"(内在价值 {value:.2f})，立即买入！", "MARKET_BUY")
             success, detail = await self.client.buy_item(item_to_buy['listing_id'])
+            if success: return balance - price # 购买成功，余额减少
+            # (失败了继续执行，也许可以竞拍)
+
+        # 3. 竞拍 (捡漏)
+        auction_bargains = []
+        for item in planet_auctions:
+            current_bid = item.get('highest_bid') or item.get('price')
+            if current_bid > balance: continue # 没钱竞拍
             
-            if success:
-                self.log(f"抄底成功: {detail}", "MARKET_BUY_SUCCESS")
-                return balance - price
-            else:
-                self.log(f"抄底失败: {detail}", "MARKET_BUY_FAIL")
+            value = self.calculate_planet_value(item.get('nft_data', {}))
+            # --- 核心修复：如果当前价格低于估值，就参与竞拍 ---
+            if current_bid < (value * self.config["BUY_DISCOUNT_THRESHOLD"]):
+                auction_bargains.append((item, value, current_bid))
+        
+        if auction_bargains:
+            item_to_bid, value, current_bid = random.choice(auction_bargains)
+            # 我们只出价到估值的 80%，或者比当前价高 5% (取较小者)，确保不亏
+            my_max_bid = value * self.config["BUY_DISCOUNT_THRESHOLD"]
+            new_bid_amount = round(min(my_max_bid, current_bid * 1.05 + 1.0), 2)
+            
+            if new_bid_amount > balance:
+                self.log(f"发现拍卖品 {item_to_bid['description']} 值得竞拍，但余额不足以出价 {new_bid_amount:.2f} FC", "INFO")
+            elif new_bid_amount > current_bid:
+                self.log(f"👉 竞拍！发现 {item_to_bid['description']} 现价 {current_bid:.2f} FC "
+                         f"(内在价值 {value:.2f})，出价 {new_bid_amount:.2f} FC！", "MARKET_BID")
+                success, detail = await self.client.place_bid(item_to_bid['listing_id'], new_bid_amount)
+                if success:
+                    return balance - new_bid_amount # 出价成功，余额（托管）减少
         
         return balance
 

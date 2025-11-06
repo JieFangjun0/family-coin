@@ -12,6 +12,28 @@ from cryptography.hazmat.primitives import serialization
 - 这是一个异步客户端 (使用 httpx)，允许机器人并发执行操作。
 - (重构) 它不再需要登录。它在初始化时直接接收私钥。
 """
+# --- 添加递归排序辅助函数 ---
+def _get_canonical_object(obj):
+    """
+    (新增) 递归排序对象，以匹配前端 crypto.js 的 getCanonicalObject。
+    确保嵌套列表和字典的签名一致性。
+    """
+    if obj is None or not isinstance(obj, (dict, list)):
+        return obj
+    
+    if isinstance(obj, list):
+        # 递归处理列表中的每个元素
+        return [_get_canonical_object(item) for item in obj]
+
+    if isinstance(obj, dict):
+        # 排序键并递归处理值
+        sorted_obj = {}
+        for key in sorted(obj.keys()):
+            sorted_obj[key] = _get_canonical_object(obj[key])
+        return sorted_obj
+        
+    # Should not be reached for dicts/lists, but good practice
+    return obj
 
 class BotClient:
     def __init__(self, base_url: str, username: str, public_key: str, private_key_pem: str):
@@ -44,14 +66,17 @@ class BotClient:
     def _sign_payload(self, message: dict) -> dict:
         """(内部) 对消息字典进行签名，返回 API 兼容的载荷。"""
         try:
+            # --- 使用递归排序 ---
             # 1. 准备消息
-            # 关键：使用 separators 匹配 Python 后端签名验证
-            message_bytes = json.dumps(
-                message, 
-                sort_keys=True, 
+            canonical_message = _get_canonical_object(message)
+            
+            message_json_str = json.dumps(
+                canonical_message, 
+                sort_keys=True, # 保持 sort_keys 作为双重保险
                 ensure_ascii=False, 
                 separators=(',', ':')
-            ).encode('utf-8')
+            )
+            message_bytes = message_json_str.encode('utf-8')
 
             # 2. 签名
             signature_bytes = self.private_key_obj.sign(message_bytes)
@@ -60,9 +85,9 @@ class BotClient:
             import base64
             signature_b64 = base64.b64encode(signature_bytes).decode('utf-8')
             
-            # 4. 返回 API 载荷
+            # 4. 返回 API 载荷 (确保使用排序后的 message_json_str)
             return {
-                "message_json": json.dumps(message, sort_keys=True, ensure_ascii=False, separators=(',', ':')),
+                "message_json": message_json_str,
                 "signature": signature_b64,
             }
         except Exception as e:
