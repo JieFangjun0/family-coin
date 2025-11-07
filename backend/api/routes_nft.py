@@ -7,7 +7,8 @@ from backend.db import queries_nft
 from backend.db import queries_user
 from backend.api.models import (
     NFTListResponse, NFTResponse, NFTActionRequest,
-    NFTActionMessage, SuccessResponse
+    NFTActionMessage, SuccessResponse,
+    AccumulatedJphResponse
 )
 from backend.api.dependencies import get_verified_nft_action_message
 from backend.nft_logic import NFT_HANDLERS, get_handler
@@ -39,6 +40,50 @@ def api_get_nft_details(nft_id: str):
         raise HTTPException(status_code=404, detail="未找到该 NFT")
     return NFTResponse(**nft)
 
+@router.get("/economics/all", tags=["NFT"])
+def api_get_all_nft_economics():
+    """
+    (V2) 获取所有公开的、非敏感的NFT经济配置 (用于解耦前端)。
+    """
+    configs = {}
+    for nft_type, handler_class in NFT_HANDLERS.items():
+        if hasattr(handler_class, 'get_economic_config_and_valuation'):
+            try:
+                config_data = handler_class.get_economic_config_and_valuation()
+                configs[nft_type] = config_data.get("config")
+            except Exception:
+                pass # 忽略没有配置的
+    return configs
+
+@router.get("/{nft_id}/jph_status", response_model=AccumulatedJphResponse, tags=["NFT"])
+def api_get_nft_jph_status(nft_id: str):
+    """
+    (V2) 获取单个NFT的实时JPH积累和冷却状态。
+    """
+    nft = queries_nft.get_nft_by_id(nft_id)
+    if not nft:
+        raise HTTPException(status_code=404, detail="未找到该 NFT")
+
+    handler = get_handler(nft['nft_type'])
+
+    # 检查处理器是否实现了所需的方法
+    if not handler or not hasattr(handler, 'get_accumulated_jph') or not hasattr(handler, 'get_harvest_cooldown_info'):
+        return AccumulatedJphResponse(
+            nft_id=nft_id, 
+            accumulated_jph=0.0, 
+            is_ready=False, 
+            cooldown_left_seconds=-1
+        )
+
+    jph = handler.get_accumulated_jph(nft['data'])
+    is_ready, cd_left = handler.get_harvest_cooldown_info(nft['data'])
+
+    return AccumulatedJphResponse(
+        nft_id=nft_id,
+        accumulated_jph=jph,
+        is_ready=is_ready,
+        cooldown_left_seconds=cd_left
+    )
 @router.post("/action", response_model=SuccessResponse, tags=["NFT"])
 def api_perform_nft_action(request: NFTActionRequest):
     message = get_verified_nft_action_message(request, NFTActionMessage)

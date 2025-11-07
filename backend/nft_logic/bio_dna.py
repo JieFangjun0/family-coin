@@ -14,23 +14,23 @@ from backend.db import queries_nft # 用于繁育时铸造新NFT和更新伴侣
 # (物种名, 稀有度, 挂机资源, 基础JPH)
 SPECIES_CONFIG = {
     "COMMON": [
-        ("绒球兔", "COMMON", "Glimmer", 0.02),
-        ("溪流蛙", "COMMON", "Glimmer", 0.02),
-        ("林地松鼠", "COMMON", "Glimmer", 0.03),
+        ("绒球兔", "COMMON", "Glimmer", 0.06),       # 原为 0.02
+        ("溪流蛙", "COMMON", "Glimmer", 0.06),       # 原为 0.02
+        ("林地松鼠", "COMMON", "Glimmer", 0.09),   # 原为 0.03
     ],
     "UNCOMMON": [
-        ("月光狐", "UNCOMMON", "Stardust", 0.05),
-        ("苔原鹿", "UNCOMMON", "Stardust", 0.06),
-        ("焰尾猫", "UNCOMMON", "Stardust", 0.07),
+        ("月光狐", "UNCOMMON", "Stardust", 0.15),   # 原为 0.05
+        ("苔原鹿", "UNCOMMON", "Stardust", 0.18),   # 原为 0.06
+        ("焰尾猫", "UNCOMMON", "Stardust", 0.21),   # 原为 0.07
     ],
     "RARE": [
-        ("幽影狼", "RARE", "Ember", 0.12),
-        ("晶歌鸟", "RARE", "Ember", 0.15),
-        ("岩背龟", "RARE", "Ember", 0.10),
+        ("幽影狼", "RARE", "Ember", 0.36),        # 原为 0.12
+        ("晶歌鸟", "RARE", "Ember", 0.45),        # 原为 0.15
+        ("岩背龟", "RARE", "Ember", 0.30),        # 原为 0.10
     ],
     "MYTHIC": [
-        ("星噬体", "MYTHIC", "Aether", 0.30),
-        ("圣光麒麟", "MYTHIC", "Aether", 0.40),
+        ("星噬体", "MYTHIC", "Aether", 0.90),      # 原为 0.30
+        ("圣光麒麟", "MYTHIC", "Aether", 1.20),     # 原为 0.40
     ]
 }
 
@@ -55,36 +55,35 @@ PERSONALITIES = ["Timid", "Brave", "Goofy", "Calm", "Lazy", "Hyper", "Serious", 
 # 4. 经济与平衡性
 PET_ECONOMICS = {
     # --- 探索 (铸造) ---
-    "EXPLORE_COST": 10.0,
-    
-    # <<< Bug 1 修复：新增探索发现概率 >>>
-    "EXPLORE_PROB_DISCOVERY": 0.1, # 10% 的几率发现灵宠
-    
-    # --- (内部概率) 发现灵宠后，稀有度的概率 (总和为1) ---
+    "EXPLORE_COST": 5.0, # 原为 10.0
+
+    "EXPLORE_PROB_DISCOVERY": 0.1, # 不变 (平均成本 5.0 / 0.1 = 50 FC)
+
+    # --- (内部概率) (不变) ---
     "EXPLORE_PROB_COMMON": 0.85,
     "EXPLORE_PROB_UNCOMMON": 0.12,
     "EXPLORE_PROB_RARE": 0.02,
     "EXPLORE_PROB_MYTHIC": 0.01,
-    
+
     # --- 养成 (训练) ---
-    "TRAIN_COST_PER_LEVEL": 5.0, # 训练成本 = 5 * (当前等级)
+    "TRAIN_COST_PER_LEVEL": 2.0, # 原为 5.0
     "XP_PER_TRAIN": 25,
-    "XP_NEEDED_PER_LEVEL": 100, # 升级所需XP = 100 * (当前等级)
-    
+    "XP_NEEDED_PER_LEVEL": 100,
+
     # --- 挂机 (JPH) ---
-    "HARVEST_COOLDOWN_SECONDS": 1 * 3600,  # 1小时
-    "HARVEST_MAX_ACCRUAL_HOURS": 12,       # 最多累积12小时
-    
+    "HARVEST_COOLDOWN_SECONDS": 60,  # 原为 1 * 3600 (1小时)
+    "HARVEST_MAX_ACCRUAL_HOURS": 12,
+
     # --- 繁育 ---
-    "BREED_COOLDOWN_SECONDS": 8 * 3600,    # 8小时
-    
-    # --- 估值模型 ---
+    "BREED_COOLDOWN_SECONDS": 8 * 3600,
+
+    # --- 估值模型 (机器人用) ---
     "VALUE_BASE": 5.0,
-    "VALUE_PER_LEVEL": 1.5,
+    "VALUE_PER_LEVEL": 4.0, # 原为 1.5 (提升训练的感知价值)
     "VALUE_RARITY_MULT": {"COMMON": 1.0, "UNCOMMON": 3.0, "RARE": 10.0, "MYTHIC": 50.0},
-    "VALUE_PER_JPH_FACTOR": 24 * 7, # 1 JPH 约等于 1 周产出的估值
+    "VALUE_PER_JPH_FACTOR": 24 * 7, # 1 JPH = 7天产出 (不变)
     "VALUE_PER_BREED_REMAINING": 15.0,
-    "VALUE_GENE_AURA_BONUS": 50.0, # 稀有光环的估值加成
+    "VALUE_GENE_AURA_BONUS": 50.0, 
 }
 
 class BioDnaHandler(NFTLogicHandler):
@@ -98,6 +97,32 @@ class BioDnaHandler(NFTLogicHandler):
 
     # --- 辅助函数 ---
     
+    @classmethod
+    def get_harvest_cooldown_info(cls, nft_data: dict) -> (bool, int):
+        """(新增) 检查收获冷却状态"""
+        cooldown = PET_ECONOMICS['HARVEST_COOLDOWN_SECONDS']
+        last_harvest = nft_data.get('last_harvest_time', 0)
+        time_left = (last_harvest + cooldown) - time.time()
+        if time_left <= 0:
+            return True, 0
+        return False, int(time_left)
+
+    @classmethod
+    def get_accumulated_jph(cls, nft_data: dict) -> float:
+        """(新增) 计算当前累积的 JPH，无论是否在冷却中"""
+        econ_stats = nft_data.get('economic_stats', {})
+        total_jph = econ_stats.get('total_jph', 0)
+        if total_jph <= 0: return 0.0
+
+        last_harvest = nft_data.get('last_harvest_time', 0)
+        seconds_passed = time.time() - last_harvest
+
+        # 限制在最大累积时间内
+        max_accrual_seconds = PET_ECONOMICS['HARVEST_MAX_ACCRUAL_HOURS'] * 3600
+        seconds_to_harvest = min(seconds_passed, max_accrual_seconds)
+
+        jcoin_produced = (seconds_to_harvest / 3600.0) * total_jph
+        return round(jcoin_produced, 6)
     def _get_phenotype(self, genes: dict) -> dict:
         """根据等位基因计算显性表型"""
         visible = {}

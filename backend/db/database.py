@@ -243,7 +243,7 @@ def init_db():
         cursor.execute('CREATE TABLE IF NOT EXISTS invitation_codes (code TEXT PRIMARY KEY, generated_by TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_used BOOLEAN DEFAULT 0, used_by TEXT, FOREIGN KEY (generated_by) REFERENCES users (public_key))')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_codes_generated_by ON invitation_codes (generated_by)")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('default_invitation_quota', str(DEFAULT_INVITATION_QUOTA)))
-        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('welcome_bonus_amount', '500'))
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('welcome_bonus_amount', '300'))
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ('inviter_bonus_amount', '200'))
 
         # +++ (修改) 新增 V2 机器人全局设置 (替换旧的删除逻辑) +++

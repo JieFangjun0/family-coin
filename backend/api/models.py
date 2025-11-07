@@ -329,3 +329,10 @@ class PublicSettingsResponse(BaseModel):
     """
     welcome_bonus_amount: float
     inviter_bonus_amount: float
+
+# --- (新增) ---
+class AccumulatedJphResponse(BaseModel):
+    nft_id: str
+    accumulated_jph: float
+    is_ready: bool
+    cooldown_left_seconds: int

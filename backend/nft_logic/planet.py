@@ -11,21 +11,21 @@ from backend.db import queries_nft
 # (这就是你提到的“精细控制其价值”的函数所依赖的配置)
 PLANET_ECONOMICS = {
     # --- 探索成本 ---
-    "EXPLORE_COST": 15.0,  # 每次探索（铸造）的成本
-    "EXPLORE_PROBABILITY_OF_DISCOVERY": 0.20, # 探索发现行星的概率 (20%)
-    
+    "EXPLORE_COST": 1000.0,  # 原为 15.0 (1000 / 0.2 = 5000 FC 平均成本)
+    "EXPLORE_PROBABILITY_OF_DISCOVERY": 0.20,
+
     # --- 扫描成本 ---
-    "SCAN_COST": 10.0, # 每次扫描异常信号的成本
-    
+    "SCAN_COST": 500.0, # 原为 10.0 (100x 灵宠成本)
+
     # --- 丰收 (JCoin 产出) 配置 ---
-    "HARVEST_COOLDOWN_SECONDS": 4 * 3600,  # 丰收冷却时间 (4小时)
-    "HARVEST_MAX_ACCRUAL_HOURS": 24,       # JCoin 最大累积时间 (24小时)，防止无限累积
-    "BASE_JCOIN_PER_HOUR": 0.05,           # 一颗“标准”行星的JPH
-    
+    "HARVEST_COOLDOWN_SECONDS": 60,  # 原为 4 * 3600 (4小时)
+    "HARVEST_MAX_ACCRUAL_HOURS": 24,
+    "BASE_JCOIN_PER_HOUR": 42.5,   # 原为 0.05 (850x 提升)
+
     # --- 估值模型参数 (用于 get_economic_config_and_valuation) ---
-    "VALUE_BASE_FLAT": 5.0,                     # 任何行星的保底估值
-    "VALUE_RARITY_FACTOR": 0.2,                 # 每1点稀有度对应的估值
-    "VALUE_JPH_FACTOR": 24 * 30,                # 1 JPH 约等于 1 个月产出的估值
+    "VALUE_BASE_FLAT": 500.0,               # 原为 5.0 (100x)
+    "VALUE_RARITY_FACTOR": 20.0,                # 原为 0.2 (100x)
+    "VALUE_JPH_FACTOR": 84,                 # 原为 24 * 30 (改为 24 * 3.5, 匹配 3.5 天的回报周期)
 }
 
 
@@ -79,17 +79,17 @@ PLANET_TYPES = {
 TRAIT_DEFINITIONS = {
     # --- 资源 (Resources) ---
     "RES_ZERO_POINT": ("零点能量场", 150, "从真空虚空中汲取无尽的能量。", {'jph_mult': 2.0}),
-    "RES_HEAVY_MINERAL": ("超重力矿脉", 80, "富含超重元素，价值连城。", {'jph_add': 0.5}),
-    "RES_DIAMOND_RAIN": ("钻石雨", 100, "大气中凝结出纯粹的碳晶体。", {'jph_add': 0.8}),
-    "RES_HELIUM_3": ("氦-3富集", 60, "完美的聚变燃料来源。", {'jph_add': 0.3}),
+    "RES_HEAVY_MINERAL": ("超重力矿脉", 80, "富含超重元素，价值连城。", {'jph_add': 500}),
+    "RES_DIAMOND_RAIN": ("钻石雨", 100, "大气中凝结出纯粹的碳晶体。", {'jph_add': 800}),
+    "RES_HELIUM_3": ("氦-3富集", 60, "完美的聚变燃料来源。", {'jph_add': 300}),
     "RES_SPICE": ("异星香料", 200, "一种神秘的致幻物质，宇宙的硬通货。", {'jph_mult': 2.5}),
     "RES_ANTIMATTER": ("反物质喷泉", 500, "极其罕见且不稳定的能量源。", {'jph_mult': 5.0}),
-    "RES_ADAMANTIUM": ("艾德曼合金矿", 300, "已知最坚硬的金属。", {'jph_add': 2.0}),
-    "RES_CRYONIUM": ("氪冰矿", 70, "一种在极低温下呈现超导特性的冰。", {'jph_add': 0.4}),
+    "RES_ADAMANTIUM": ("艾德曼合金矿", 300, "已知最坚硬的金属。", {'jph_add': 2000}),
+    "RES_CRYONIUM": ("氪冰矿", 70, "一种在极低温下呈现超导特性的冰。", {'jph_add': 400}),
     
     # --- 生命 (Lifeforms) ---
-    "LIFE_SILICON": ("硅基生命痕迹", 120, "在熔岩河中繁衍的晶体生物。", {'jph_add': 0.1}),
-    "LIFE_SENTIENT_PLANT": ("感知植物群", 90, "覆盖全球的巨大真菌网络，拥有共同意识。", {'jph_add': 0.2}),
+    "LIFE_SILICON": ("硅基生命痕迹", 120, "在熔岩河中繁衍的晶体生物。", {'jph_add': 100}),
+    "LIFE_SENTIENT_PLANT": ("感知植物群", 90, "覆盖全球的巨大真菌网络，拥有共同意识。", {'jph_add': 200}),
     "LIFE_GAS_WHALE": ("气态巨兽", 70, "在风暴中遨游的巨大生物。", {}),
     "LIFE_EXTREMEPHILE": ("极端微生物", 30, "在最恶劣环境中也能生存的细菌。", {}),
     "LIFE_PARADISE": ("生物天堂", 250, "一个未受干扰的、极其繁荣的生态系统。", {'jph_mult': 1.5}),
@@ -97,16 +97,16 @@ TRAIT_DEFINITIONS = {
 
     # --- 遗迹 (Artifacts) ---
     "ART_ANCIENT_RUINS": ("远古外星遗物", 100, "一个早已消亡的文明留下的城市废墟。", {}),
-    "ART_SLEEPING_SHIP": ("休眠的星际飞船", 150, "一艘巨大的飞船，静静地等待着被唤醒。", {'jph_add': 0.5}),
+    "ART_SLEEPING_SHIP": ("休眠的星际飞船", 150, "一艘巨大的飞船，静静地等待着被唤醒。", {'jph_add': 500}),
     "ART_UNSTABLE_PORTAL": ("不稳定的传送门", 180, "一个通往未知维度、时开时关的裂隙。", {}),
     "ART_FORERUNNER_MAP": ("先行者星图", 220, "指向银河系中某个秘密位置的地图。", {}),
     "ART_WORLD_ENGINE": ("世界引擎", 400, "一个能改造星球气候的巨大机器。", {'jph_mult': 3.0}),
-    "ART_DYSON_SPHERE_FRAG": ("戴森球残片", 300, "环绕恒星的巨大建筑的碎片。", {'jph_add': 1.5}),
+    "ART_DYSON_SPHERE_FRAG": ("戴森球残片", 300, "环绕恒星的巨大建筑的碎片。", {'jph_add': 1500}),
     "ART_ORACLE": ("神谕AI", 350, "一个古老的超级AI，能回答任何问题...但有代价。", {}),
 
     # --- 奇观 (Wonders) ---
     "WON_ETERNAL_STORM": ("永恒风暴", 80, "一场持续了数百万年的超级雷暴。", {}),
-    "WON_NATURAL_PULSAR": ("天然脉冲星", 130, "星球的核心是一个小型脉冲星。", {'jph_add': 0.7}),
+    "WON_NATURAL_PULSAR": ("天然脉冲星", 130, "星球的核心是一个小型脉冲星。", {'jph_add': 700}),
     "WON_SKY_MIRROR": ("天空之镜", 90, "地表被一层完美的液态金属覆盖。", {}),
     "WON_FLOATING_ISLES": ("悬浮岛屿", 110, "巨大的陆块因磁场异常而漂浮在空中。", {}),
     "WON_CRYSTAL_FOREST": ("水晶森林", 70, "整片大陆长满了巨大的硅晶体。", {}),
@@ -124,7 +124,7 @@ TRAIT_DEFINITIONS = {
     "DUD_NOTHING": ("一无所获", 0, "信号源似乎只是普通的自然现象。", {}),
     
     # --- 填充位 (使总数超过50) ---
-    "RES_WATER_ICE": ("丰富的水冰", 10, "在寒冷地带很常见，但仍有价值。", {'jph_add': 0.05}),
+    "RES_WATER_ICE": ("丰富的水冰", 10, "在寒冷地带很常见，但仍有价值。", {'jph_add': 50}),
     "RES_THOLINS": ("泰坦有机S", 20, "富含有机分子的粘稠物质。", {}),
     "LIFE_FUNGAL_WASTES": ("真菌荒原", 15, "地表被奇异的真菌覆盖。", {}),
     "WON_AURORA": ("强极光", 5, "美丽的宇宙景象。", {}),
@@ -137,7 +137,7 @@ TRAIT_DEFINITIONS = {
     "LIFE_BACTERIA": ("细菌菌落", 5, "最简单的生命形式。", {}),
     "ART_SATELLITE": ("失控的人造卫星", 15, "一颗早期文明发射的卫星。", {}),
     "DUD_MAGNETIC_FIELD": ("异常磁场", -10, "干扰了所有设备。", {'jph_mult': 0.9}),
-    "RES_METHANE_LAKE": ("甲烷湖", 20, "液态甲烷构成的湖泊。", {'jph_add': 0.1}),
+    "RES_METHANE_LAKE": ("甲烷湖", 20, "液态甲烷构成的湖泊。", {'jph_add': 100}),
 }
 
 # 异常信号定义 (Anomaly Definitions)
@@ -192,6 +192,32 @@ class PlanetHandler(NFTLogicHandler):
     """
     “星球” NFT 的逻辑处理器 (V3 - 资源产出版)。
     """
+    @classmethod
+    def get_harvest_cooldown_info(cls, nft_data: dict) -> (bool, int):
+        """(新增) 检查收获冷却状态"""
+        cooldown = PLANET_ECONOMICS['HARVEST_COOLDOWN_SECONDS']
+        last_harvest = nft_data.get('last_harvest_time', 0)
+        time_left = (last_harvest + cooldown) - time.time()
+        if time_left <= 0:
+            return True, 0
+        return False, int(time_left)
+
+    @classmethod
+    def get_accumulated_jph(cls, nft_data: dict) -> float:
+        """(新增) 计算当前累积的 JPH，无论是否在冷却中"""
+        econ_stats = nft_data.get('economic_stats', {})
+        total_jph = econ_stats.get('total_jph', 0)
+        if total_jph <= 0: return 0.0
+
+        last_harvest = nft_data.get('last_harvest_time', 0)
+        seconds_passed = time.time() - last_harvest
+
+        # 限制在最大累积时间内
+        max_accrual_seconds = PLANET_ECONOMICS['HARVEST_MAX_ACCRUAL_HOURS'] * 3600
+        seconds_to_harvest = min(seconds_passed, max_accrual_seconds)
+
+        jcoin_produced = (seconds_to_harvest / 3600.0) * total_jph
+        return round(jcoin_produced, 6)
     @classmethod
     def get_display_name(cls) -> str:
         return "星球"
