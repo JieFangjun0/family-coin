@@ -131,6 +131,31 @@ def init_db():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_uid ON users (uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_is_bot ON users (is_bot)")
             
+            system_accounts = [
+                # (public_key, uid, username, password_hash, invited_by, is_bot)
+                (GENESIS_ACCOUNT, "SYS_G", "SYSTEM_GENESIS", "!", "SYSTEM", True),
+                (BURN_ACCOUNT, "SYS_B", "SYSTEM_BURN", "!", "SYSTEM", True),
+                (ESCROW_ACCOUNT, "SYS_E", "SYSTEM_ESCROW", "!", "SYSTEM", True),
+            ]
+            insert_query = """
+                INSERT INTO users 
+                (public_key, uid, username, password_hash, invited_by, is_bot, is_active) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (public_key) DO NOTHING
+            """
+            for acc in system_accounts:
+                # 传入 (public_key, uid, username, password_hash, invited_by, is_bot, is_active)
+                cursor.execute(insert_query, acc + (True,)) # 默认为 active
+                
+            # 确保系统账户也有 balance 记录，尽管它们可能不直接使用
+            balance_query = """
+                INSERT INTO balances (public_key, balance) VALUES (%s, 0)
+                ON CONFLICT (public_key) DO NOTHING
+            """
+            cursor.execute(balance_query, (GENESIS_ACCOUNT,))
+            cursor.execute(balance_query, (BURN_ACCOUNT,))
+            cursor.execute(balance_query, (ESCROW_ACCOUNT,))
+            
             # --- 用户个人主页表 ---
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_profiles (
