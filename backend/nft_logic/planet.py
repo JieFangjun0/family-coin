@@ -4,8 +4,8 @@ import random
 import time
 import uuid
 import math
-from .base import NFTLogicHandler
-from backend.db import queries_nft
+
+
 
 # --- V3 经济与平衡性配置 ---
 # (这就是你提到的“精细控制其价值”的函数所依赖的配置)
@@ -370,6 +370,8 @@ class PlanetHandler(NFTLogicHandler):
         """
         (V3 修改) 处理“探索星空”动作。
         """
+        from backend.db import queries_nft
+        from .base import NFTLogicHandler
         cost = PLANET_ECONOMICS['EXPLORE_COST']
         prob = PLANET_ECONOMICS['EXPLORE_PROBABILITY_OF_DISCOVERY']
         

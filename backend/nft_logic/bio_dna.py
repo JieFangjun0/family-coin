@@ -5,7 +5,7 @@ import time
 import uuid
 import math
 import json  # <<<  Bug 2 修复：导入 json 模块
-from .base import NFTLogicHandler
+
 from backend.db import queries_nft # 用于繁育时铸造新NFT和更新伴侣
 
 # --- 灵宠世界观与经济设定 ---
@@ -313,6 +313,7 @@ class BioDnaHandler(NFTLogicHandler):
             return True, "可以训练"
 
         if action == 'breed':
+            from .base import NFTLogicHandler
             if data.get('gender') != 'Female':
                 return False, "只有雌性灵宠可以发起繁育"
             if data.get('breeding_count', 0) >= data.get('breeding_limit', 0):

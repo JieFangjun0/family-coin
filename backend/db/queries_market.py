@@ -12,7 +12,7 @@ from backend.db.database import (
 )
 from backend.db.queries_nft import _validate_nft_for_trade, _change_nft_owner
 from backend.db.queries_user import get_balance
-from backend.nft_logic import get_handler
+
 
 def _log_market_trade(conn, listing_id: str, nft_id: str, nft_type: str, trade_type: str, seller_key: str, buyer_key: str, price: float):
     """(内部函数) 记录一笔成功的市场交易。"""
@@ -439,18 +439,7 @@ def get_market_listings(listing_type: str, exclude_owner: str = None, search_ter
                     except json.JSONDecodeError:
                         row_dict['nft_data'] = None # 处理脏数据
                 
-                item = row_dict
-                if item.get('nft_data'):
-                    nft_type = item.get('nft_type')
-                    handler = get_handler(nft_type)
-                    if handler:
-                        temp_nft_for_desc = {"data": item['nft_data'], "nft_type": nft_type}
-                        item['trade_description'] = handler.get_trade_description(temp_nft_for_desc)
-                    else:
-                        item['trade_description'] = item['description']
-                else:
-                    item['trade_description'] = item['description']
-                results.append(item)
+                results.append(row_dict)
             return results
 
 def get_listing_details(listing_id: str) -> dict:

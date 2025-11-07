@@ -1,12 +1,10 @@
 # backend/main.py
 
 from fastapi import FastAPI
-import threading
+import asyncio
 import uvicorn
 from backend.db.database import init_db
-from backend.bots import bot_runner
-
-# 导入所有 API 路由模块
+# 导入所有 API 路由模块 (让它们先被加载和注册)
 from backend.api import routes_system
 from backend.api import routes_user
 from backend.api import routes_friends
@@ -15,6 +13,10 @@ from backend.api import routes_market
 from backend.api import routes_admin
 from backend.api import routes_notifications
 
+from backend.bots import bot_runner
+
+
+
 app = FastAPI(
     title="JCoin API (V0.4.0 - Refactored)",
     description="一个用于家庭和朋友的中心化玩具加密货币API (已解耦)",
@@ -22,17 +24,16 @@ app = FastAPI(
 )
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
+    """
+    应用启动时执行初始化。
+    """
     print("正在启动 API ... 初始化数据库...")
     init_db()
     
-    print("--- API 启动：正在启动后台机器人调度器线程... ---")
-    bot_thread = threading.Thread(
-        target=bot_runner.run_bot_loop, 
-        daemon=True 
-    )
-    bot_thread.start()
-    print("--- API 启动：机器人线程已启动。 ---")
+    print("--- API 启动：正在启动后台机器人调度器任务... ---")
+    asyncio.create_task(bot_runner.run_bot_loop())
+    print("--- API 启动：机器人任务已启动。 ---")
 
 # --- 包含所有解耦的路由 ---
 
@@ -54,11 +55,10 @@ app.include_router(routes_market.router, prefix="/market", tags=["Market"])
 # 6. 管理员路由 (/admin/...)
 app.include_router(routes_admin.router, prefix="/admin", tags=["Admin"])
 
-# 7. 通知路由 (/notifications/...) <<< 新增 >>>
+# 7. 通知路由 (/notifications/...)
 app.include_router(routes_notifications.router, tags=["Notifications"])
 
 # --- 启动 (用于本地调试) ---
 if __name__ == "__main__":
     print("--- 警告：正在以调试模式启动 (非 Docker) ---")
-    # on_startup() # uvicorn.run 会自动处理 startup 事件
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
