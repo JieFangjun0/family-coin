@@ -543,3 +543,37 @@ def get_friend_requests(public_key: str) -> list:
             """
             cursor.execute(query, {"pk": public_key})
             return [dict(row) for row in cursor.fetchall()]
+        
+def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
+    """
+    (内部通用函数) 验证一个NFT是否可以被交易。
+    依赖传入的 DictCursor。
+    返回: (是否可交易, 错误信息, NFT数据字典)
+    """
+    from backend.nft_logic import get_handler # 延迟导入以避免循环
+
+    cursor.execute("SELECT nft_id, owner_key, nft_type, data, status FROM nfts WHERE nft_id = %s", (nft_id,))
+    nft_row = cursor.fetchone()
+
+    if not nft_row:
+        return False, "NFT不存在", None
+    
+    # nft_row 已经是字典 (或类字典对象)，因为传入的是 DictCursor
+    nft = dict(nft_row) 
+    nft['data'] = json.loads(nft['data']) # 提前解析data
+
+    if nft['status'] != 'ACTIVE':
+        return False, "NFT不是活跃状态", nft
+    
+    if nft['owner_key'] != expected_owner:
+        return False, "你不是该NFT的所有者", nft
+
+    handler = get_handler(nft['nft_type'])
+    if not handler:
+        return False, f"未找到类型为 {nft['nft_type']} 的处理器，交易被拒绝", nft
+
+    is_ok, reason = handler.is_tradable(nft)
+    if not is_ok:
+        return False, reason, nft
+            
+    return True, "验证通过", nft

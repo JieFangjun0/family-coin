@@ -6,39 +6,7 @@ import psycopg2.errors
 from backend.db.database import get_db_connection
 from psycopg2.extras import DictCursor
 
-def _validate_nft_for_trade(cursor, nft_id: str, expected_owner: str) -> (bool, str, dict):
-    """
-    (内部通用函数) 验证一个NFT是否可以被交易。
-    依赖传入的 DictCursor。
-    返回: (是否可交易, 错误信息, NFT数据字典)
-    """
-    from backend.nft_logic import get_handler # 延迟导入以避免循环
 
-    cursor.execute("SELECT nft_id, owner_key, nft_type, data, status FROM nfts WHERE nft_id = %s", (nft_id,))
-    nft_row = cursor.fetchone()
-
-    if not nft_row:
-        return False, "NFT不存在", None
-    
-    # nft_row 已经是字典 (或类字典对象)，因为传入的是 DictCursor
-    nft = dict(nft_row) 
-    nft['data'] = json.loads(nft['data']) # 提前解析data
-
-    if nft['status'] != 'ACTIVE':
-        return False, "NFT不是活跃状态", nft
-    
-    if nft['owner_key'] != expected_owner:
-        return False, "你不是该NFT的所有者", nft
-
-    handler = get_handler(nft['nft_type'])
-    if not handler:
-        return False, f"未找到类型为 {nft['nft_type']} 的处理器，交易被拒绝", nft
-
-    is_ok, reason = handler.is_tradable(nft)
-    if not is_ok:
-        return False, reason, nft
-            
-    return True, "验证通过", nft
 
 def mint_nft(owner_key: str, nft_type: str, data: dict, conn=None) -> (bool, str, str):
     """(底层) 将一个新的 NFT 记录到数据库中。"""
@@ -136,10 +104,3 @@ def update_nft(nft_id: str, new_data: dict, new_status: str = None) -> (bool, st
             conn.rollback()
             return False, f"更新 NFT 时数据库出错: {e}"
 
-def _change_nft_owner(nft_id: str, new_owner_key: str, conn) -> (bool, str):
-    """(内部函数) 转移NFT所有权，在现有事务连接中执行。"""
-    with conn.cursor(cursor_factory=DictCursor) as cursor:
-        cursor.execute("UPDATE nfts SET owner_key = %s WHERE nft_id = %s", (new_owner_key, nft_id))
-        if cursor.rowcount == 0:
-            return False, f"转移NFT所有权失败: 未找到NFT {nft_id}"
-        return True, "NFT所有权转移成功"

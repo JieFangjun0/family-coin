@@ -7,7 +7,7 @@ import math
 import json  # <<<  Bug 2 修复：导入 json 模块
 
 from backend.db import queries_nft # 用于繁育时铸造新NFT和更新伴侣
-
+from .base import NFTLogicHandler
 # --- 灵宠世界观与经济设定 ---
 
 # 1. 物种
