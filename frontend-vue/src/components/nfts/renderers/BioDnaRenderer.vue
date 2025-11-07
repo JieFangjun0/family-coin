@@ -103,7 +103,7 @@ onMounted(() => {
   
   // (新增) JPH 轮询
   pollJphStatus();
-  pollTimer = setInterval(pollJphStatus, 5000); // 设置每 5 秒轮询
+  pollTimer = setInterval(pollJphStatus, 30000); // 设置每 30 秒轮询
 })
 
 onUnmounted(() => {

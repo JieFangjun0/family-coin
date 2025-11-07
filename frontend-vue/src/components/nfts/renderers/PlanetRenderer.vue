@@ -55,7 +55,7 @@ async function pollJphStatus() {
 
 onMounted(() => {
   pollJphStatus(); // 立即调用一次
-  pollTimer = setInterval(pollJphStatus, 5000); // 设置每 5 秒轮询
+  pollTimer = setInterval(pollJphStatus, 30000); // 设置每 5 秒轮询
 })
 
 onUnmounted(() => {
@@ -255,7 +255,7 @@ export function getSearchableText(data) {
           
           <li class="jph-line"><strong>资源产出:</strong> 💰 {{ formatCurrency(jph) }} JCoin / 小时</li>
           <li class="harvest-line"><strong>收获状态:</strong> 
-            <span :class="{ 'ready': can_harvest, 'cooldown': !can_harvest }">
+            <span :class="{ 'ready':  isReadyToHarvest, 'cooldown': ! isReadyToHarvest }">
               {{ harvest_cooldown_str }}
             </span>
           </li>
