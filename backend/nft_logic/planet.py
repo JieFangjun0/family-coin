@@ -11,13 +11,13 @@ from backend.db import queries_nft
 # (这就是你提到的“精细控制其价值”的函数所依赖的配置)
 PLANET_ECONOMICS = {
     # --- 探索成本 ---
-    "EXPLORE_COST": 1000.0,  # 原为 15.0 (1000 / 0.2 = 5000 FC 平均成本)
-    "EXPLORE_PROBABILITY_OF_DISCOVERY": 0.20,
+    "EXPLORE_COST": 100.0,  # 原为 15.0 (1000 / 0.2 = 5000 FC 平均成本)
+    "EXPLORE_PROBABILITY_OF_DISCOVERY": 0.01,
 
     # --- 扫描成本 ---
     "SCAN_COST": 500.0, # 原为 10.0 (100x 灵宠成本)
 
-    # --- 丰收 (JCoin 产出) 配置 ---
+    # --- 收获 (JCoin 产出) 配置 ---
     "HARVEST_COOLDOWN_SECONDS": 60,  # 原为 4 * 3600 (4小时)
     "HARVEST_MAX_ACCRUAL_HOURS": 24,
     "BASE_JCOIN_PER_HOUR": 42.5,   # 原为 0.05 (850x 提升)
@@ -321,7 +321,7 @@ class PlanetHandler(NFTLogicHandler):
                 "base_jph": base_jph,
                 "total_jph": base_jph # 初始JPH等于基础JPH
             },
-            "last_harvest_time": time.time() # 初始丰收时间
+            "last_harvest_time": time.time() # 初始收获时间
         }
         
         # 初始计算 (虽然没有特质，但保持流程一致)
@@ -436,7 +436,7 @@ class PlanetHandler(NFTLogicHandler):
                 time_left = int((last_harvest + cooldown) - time.time())
                 return False, f"资源正在再生中，剩余冷却时间: {time_left // 60} 分钟 {time_left % 60} 秒"
             
-            return True, "可以丰收"
+            return True, "可以收获"
 
         return super().validate_action(nft, action, action_data, requester_key)
 
@@ -505,14 +505,14 @@ class PlanetHandler(NFTLogicHandler):
             jcoin_produced = (seconds_to_harvest / 3600.0) * total_jph
             
             if jcoin_produced <= 0:
-                return False, "产出为0，无法丰收", {}
+                return False, "产出为0，无法收获", {}
                 
             updated_data['last_harvest_time'] = time.time()
             
             # --- (V3 核心) 使用特殊键传回产出 ---
             updated_data['__jcoin_produced__'] = round(jcoin_produced, 4)
             
-            return True, f"丰收成功！你从星球收集了 {jcoin_produced:.4f} JCoin。", updated_data
+            return True, f"收获成功！你从星球收集了 {jcoin_produced:.4f} JCoin。", updated_data
 
         return super().perform_action(nft, action, action_data, requester_key, conn) # <<< (2) 传递 conn
 

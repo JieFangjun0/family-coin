@@ -121,7 +121,7 @@ class PlanetCapitalistBot(BaseBot):
     # --- 机器人行为 ---
 
     async def _action_harvest_planets(self, my_planets: list, balance: float) -> float:
-        """(挖矿) 检查所有星球并丰收"""
+        """(挖矿) 检查所有星球并收获"""
         self.log("检查星球 JPH 产出...", action_type="HARVEST_CHECK")
         harvested_count = 0
         
@@ -135,20 +135,20 @@ class PlanetCapitalistBot(BaseBot):
             cooldown = PLANET_ECONOMICS['HARVEST_COOLDOWN_SECONDS']
             
             if time.time() > (last_harvest + cooldown):
-                # 可以丰收
+                # 可以收获
                 name = data.get('custom_name') or nft['nft_id'][:6]
-                self.log(f"正在丰收 {name} (JPH: {jph:.2f})...", action_type="NFT_ACTION_HARVEST")
+                self.log(f"正在收获 {name} (JPH: {jph:.2f})...", action_type="NFT_ACTION_HARVEST")
                 success, detail = await self.client.nft_action(nft['nft_id'], 'harvest', {})
                 if success:
                     harvested_count += 1
                     # (余额会在下次循环开始时更新，这里不模拟加法)
-                    self.log(f"丰收成功: {detail}", "NFT_ACTION_SUCCESS")
+                    self.log(f"收获成功: {detail}", "NFT_ACTION_SUCCESS")
                 else:
-                    self.log(f"丰收失败: {detail}", "NFT_ACTION_FAIL")
+                    self.log(f"收获失败: {detail}", "NFT_ACTION_FAIL")
         
         if harvested_count > 0:
             new_balance = await self.client.get_balance()
-            self.log(f"总共丰收了 {harvested_count} 颗星球，新余额: {new_balance:.2f} FC", "INFO")
+            self.log(f"总共收获了 {harvested_count} 颗星球，新余额: {new_balance:.2f} FC", "INFO")
             return new_balance
         
         return balance

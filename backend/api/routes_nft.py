@@ -146,11 +146,11 @@ def api_perform_nft_action(request: NFTActionRequest):
                 jcoin_produced = updated_data.pop('__jcoin_produced__', 0.0)
                 if jcoin_produced > 0:
                     success_grant, detail_grant = _create_system_transaction(
-                        GENESIS_ACCOUNT, message.owner_key, jcoin_produced, f"NFT 丰收: {nft['nft_id'][:8]}", conn
+                        GENESIS_ACCOUNT, message.owner_key, jcoin_produced, f"NFT 收获: {nft['nft_id'][:8]}", conn
                     )
                     if not success_grant:
                         conn.rollback()
-                        raise HTTPException(status_code=500, detail=f"丰收成功但JCoin发放失败: {detail_grant}")
+                        raise HTTPException(status_code=500, detail=f"收获成功但JCoin发放失败: {detail_grant}")
 
             # --- 4. 更新 NFT 数据 ---
             new_status = updated_data.pop('__new_status__', None)

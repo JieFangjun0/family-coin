@@ -40,7 +40,7 @@ async function fetchData() {
   }
 
   if (nftsRes[1]) {
-    errorMessage.value = (errorMessage.value || '') + `加载NFT列表失败: ${nftsRes[1]}`
+    errorMessage.value = (errorMessage.value || '') + `加载藏品列表失败: ${nftsRes[1]}`
   } else {
     myNfts.value = nftsRes[0].nfts
   }
@@ -50,7 +50,7 @@ async function fetchData() {
 
 // --- 核心修改 (请求 3b): 移除旧的 nftOptions computed ---
 
-// +++ 核心修改 (请求 3b): 新增NFT点选处理函数 +++
+// +++ 核心修改 (请求 3b): 新增藏品点选处理函数 +++
 function toggleNftSelection(nftId) {
   const index = form.value.selectedNftIds.indexOf(nftId);
   if (index > -1) {
@@ -62,7 +62,7 @@ function toggleNftSelection(nftId) {
       form.value.selectedNftIds.push(nftId);
     } else {
       // 可以在这里显示一个更友好的提示，但 alert 是最简单的
-      alert("最多只能选择 6 个NFT进行展出。");
+      alert("最多只能选择 6 个藏品进行展出。");
     }
   }
 }
@@ -131,9 +131,9 @@ onMounted(fetchData)
       </div>
 
       <div class="form-group">
-        <label>选择要展出的NFT (已选 {{ form.selectedNftIds.length }} / 6)</label>
+        <label>选择要展出的藏品 (已选 {{ form.selectedNftIds.length }} / 6)</label>
         <div v-if="!myNfts || myNfts.length === 0" class="empty-state">
-          你还没有任何NFT可供展出。
+          你还没有任何藏品可供展出。
         </div>
         <div v-else class="nft-selection-grid">
           <div
@@ -183,7 +183,7 @@ onMounted(fetchData)
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1rem;
-  max-height: 600px; /* 如果NFT太多，允许滚动 */
+  max-height: 600px; /* 如果藏品太多，允许滚动 */
   overflow-y: auto;
   background: #f7fafc;
   padding: 1rem;

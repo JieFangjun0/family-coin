@@ -226,7 +226,7 @@ class BotClient:
 
     # +++ (新增) 允许机器人执行 NFT 动作 +++
     async def nft_action(self, nft_id: str, action: str, action_data: dict) -> (bool, str):
-        """(新增) 对自己的 NFT 执行一个动作 (例如: 扫描, 丰收)。"""
+        """(新增) 对自己的 NFT 执行一个动作 (例如: 扫描, 收获)。"""
         message = {
             "owner_key": self.public_key,
             "nft_id": nft_id,

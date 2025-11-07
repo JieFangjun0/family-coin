@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { formatTimestamp, formatCurrency } from '@/utils/formatters'
 import { apiCall } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { useEconomicsStore } from '@/stores/economics.js'
 
 const props = defineProps({
   nft: { type: Object, required: true },
@@ -13,10 +14,12 @@ const props = defineProps({
 const emit = defineEmits(['action'])
 const authStore = useAuthStore()
 
-// --- 经济配置 (从 bio_dna.py 复制) ---
-const HARVEST_COOLDOWN_SECONDS = 1 * 3600; // 1 小时
-const TRAIN_COST_PER_LEVEL = 5.0;
-const XP_NEEDED_PER_LEVEL = 100;
+// --- 经济配置 (从 Store 解耦) ---
+const econStore = useEconomicsStore()
+const bioEcon = computed(() => econStore.configs.BIO_DNA || {})
+const HARVEST_COOLDOWN_SECONDS = computed(() => bioEcon.value.HARVEST_COOLDOWN_SECONDS || 3600)
+const TRAIN_COST_PER_LEVEL = computed(() => bioEcon.value.TRAIN_COST_PER_LEVEL || 5.0)
+const XP_NEEDED_PER_LEVEL = computed(() => bioEcon.value.XP_NEEDED_PER_LEVEL || 100)
 
 // +++ Bug 3 修复: 添加中文化映射 +++
 const RARITY_MAP = {
@@ -72,16 +75,40 @@ const form = reactive({
   }
 })
 
-// --- 计时器 (用于丰收和冷却) ---
+// --- 计时器 (用于收获和冷却) ---
 const now = ref(Date.now() / 1000)
 let timer;
+// +++ (新增) JPH 实时状态 +++
+const accumulatedJph = ref(0.0)
+const isReadyToHarvest = ref(false)
+const cooldownLeftSeconds = ref(0)
+let pollTimer = null;
+
+// +++ (新增) JPH 轮询函数 +++
+async function pollJphStatus() {
+  if (!props.nft || !props.nft.nft_id) return;
+  const [data, error] = await apiCall('GET', `/nfts/${props.nft.nft_id}/jph_status`);
+  if (data) {
+    accumulatedJph.value = data.accumulated_jph;
+    isReadyToHarvest.value = data.is_ready;
+    cooldownLeftSeconds.value = data.cooldown_left_seconds;
+  }
+}
+
 onMounted(() => {
+  // (保留) 原有计时器，用于训练/繁育
   timer = setInterval(() => {
     now.value = Date.now() / 1000
   }, 1000)
+  
+  // (新增) JPH 轮询
+  pollJphStatus();
+  pollTimer = setInterval(pollJphStatus, 5000); // 设置每 5 秒轮询
 })
+
 onUnmounted(() => {
-  clearInterval(timer)
+  clearInterval(timer); // (保留)
+  clearInterval(pollTimer); // (新增)
 })
 
 // --- 计算属性 (用于UI展示) ---
@@ -94,27 +121,34 @@ const cooldowns = computed(() => nftData.value.cooldowns || {})
 
 // 产出 (JPH)
 const jph = computed(() => econ.value.total_jph || 0)
-const last_harvest_time = computed(() => nftData.value.last_harvest_time || 0)
-const next_harvest_time = computed(() => last_harvest_time.value + HARVEST_COOLDOWN_SECONDS)
-const can_harvest = computed(() => jph.value > 0 && now.value > next_harvest_time.value)
+// (移除 last_harvest_time 和 next_harvest_time)
+// (移除 can_harvest)
 const harvest_cooldown_str = computed(() => {
     if (jph.value <= 0) return '不可产出';
-    const timeLeft = Math.max(0, next_harvest_time.value - now.value);
-    if (timeLeft === 0) return '可以丰收';
+    
+    // 使用来自 API 的 isReadyToHarvest
+    if (isReadyToHarvest.value) {
+      return `可收获 (已积累: ${accumulatedJph.value.toFixed(4)} JCoin)`;
+    }
+    
+    // 使用来自 API 的 cooldownLeftSeconds
+    const timeLeft = cooldownLeftSeconds.value;
+    if (timeLeft <= 0) return '正在计算...';
+
     const minutes = Math.floor(timeLeft / 60)
     const seconds = Math.floor(timeLeft % 60)
     return `冷却中: ${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`
 })
 
-// 训练 (XP)
+// 训练 (XP) - (注意 .value 的使用)
 const level = computed(() => nftData.value.level || 1)
 const xp = computed(() => nftData.value.xp || 0)
-const xp_needed = computed(() => XP_NEEDED_PER_LEVEL * level.value)
-const train_cost = computed(() => TRAIN_COST_PER_LEVEL * level.value)
+const xp_needed = computed(() => XP_NEEDED_PER_LEVEL.value * level.value)
+const train_cost = computed(() => TRAIN_COST_PER_LEVEL.value * level.value)
 const train_cooldown_left = computed(() => Math.max(0, (cooldowns.value.train_until || 0) - now.value))
 const can_train = computed(() => train_cooldown_left.value === 0)
 
-// 繁育 (Breed)
+// 繁育 (Breed) - (无变化, 依赖 'now')
 const breeds_left = computed(() => (nftData.value.breeding_limit || 0) - (nftData.value.breeding_count || 0))
 const breed_cooldown_left = computed(() => Math.max(0, (cooldowns.value.breed_until || 0) - now.value))
 const can_breed = computed(() => nftData.value.gender === 'Female' && breeds_left.value > 0 && breed_cooldown_left.value === 0)
@@ -325,21 +359,21 @@ export function getSearchableText(data) {
       <template v-if="context === 'collection' && nft.data">
         
         <div class="action-form harvest-form">
-            <h4>资源丰收</h4>
-            <p class="help-text">收集该灵宠累积的 JCoin。冷却时间: 1 小时。</p>
+            <h4>资源收获</h4>
+            <p class="help-text">收集该灵宠累积的 JCoin。冷却时间: {{ (HARVEST_COOLDOWN_SECONDS / 3600).toFixed(1) }} 小时。</p>
             <form @submit.prevent="handleHarvest">
-                <button type="submit" :disabled="!can_harvest">
-                  {{ can_harvest ? `立即丰收 (产出: ${jph.toFixed(2)} JCoin/hr)` : harvest_cooldown_str }}
+                <button type="submit" :disabled="!isReadyToHarvest">
+                  {{ isReadyToHarvest ? `立即收获 (已积累: ${accumulatedJph.toFixed(4)} JCoin)` : harvest_cooldown_str }}
                 </button>
             </form>
         </div>
         
         <div class="action-form">
             <h4>灵宠训练</h4>
-            <p class="help-text">消耗 {{ formatCurrency(train_cost) }} FC 进行一次训练，获得 {{ XP_NEEDED_PER_LEVEL / 4 }} XP。</p>
+            <p class="help-text">消耗 {{ formatCurrency(train_cost) }} JCoin 进行一次训练，获得 {{ XP_NEEDED_PER_LEVEL / 4 }} XP。</p>
             <form @submit.prevent="handleTrain">
                 <button type="submit" :disabled="!can_train">
-                  {{ can_train ? `开始训练 (消耗 ${formatCurrency(train_cost)} FC)` : `训练冷却中 (${Math.ceil(train_cooldown_left/60)} 分钟)` }}
+                  {{ can_train ? `开始训练 (消耗 ${formatCurrency(train_cost)} JCoin)` : `训练冷却中 (${Math.ceil(train_cooldown_left/60)} 分钟)` }}
                 </button>
             </form>
         </div>
@@ -391,7 +425,7 @@ export function getSearchableText(data) {
               </select>
             </div>
             <div class="form-group">
-                <label>{{ form.list.listing_type === 'SALE' ? '价格 (FC)' : '起拍价 (FC)' }}</label>
+                <label>{{ form.list.listing_type === 'SALE' ? '价格 (JCoin)' : '起拍价 (JCoin)' }}</label>
                 <input type="number" v-model.number="form.list.price" min="0.01" step="0.01" required />
             </div>
             <div class="form-group" v-if="form.list.listing_type === 'AUCTION'">

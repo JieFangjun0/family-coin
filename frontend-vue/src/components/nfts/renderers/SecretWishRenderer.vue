@@ -133,7 +133,7 @@ export function getSearchableText(data) {
             </select>
           </div>
           <div class="form-group">
-              <label>{{ form.list.listing_type === 'SALE' ? '价格 (FC)' : '起拍价 (FC)' }}</label>
+              <label>{{ form.list.listing_type === 'SALE' ? '价格 (JCoin)' : '起拍价 (JCoin)' }}</label>
               <input type="number" v-model.number="form.list.price" min="0.01" step="0.01" required />
           </div>
           <div class="form-group" v-if="form.list.listing_type === 'AUCTION'">

@@ -41,7 +41,7 @@ const profileSortedNftTypes = computed(() => {
     return Object.keys(profileNftsByType.value)
 })
 
-// +++ 核心修改 (请求 3a): 新增函数获取NFT名称 +++
+// +++ 核心修改 (请求 3a): 新增函数获取藏品名称 +++
 async function fetchNftDisplayNames() {
   if (Object.keys(nftDisplayNames.value).length > 0) return; // 已经获取过了
   const [data, error] = await apiCall('GET', '/nfts/display_names')
@@ -117,7 +117,7 @@ watch(() => route.params.uid, (newUid) => {
 });
 
 onMounted(() => {
-  fetchNftDisplayNames(); // +++ 核心修改 (请求 3a): 预加载NFT名称
+  fetchNftDisplayNames(); // +++ 核心修改 (请求 3a): 预加载藏品名称
   if (route.params.uid) {
     searchTerm.value = route.params.uid;
     handleSearch(route.params.uid);
@@ -166,7 +166,7 @@ onMounted(() => {
 
 
       <div class="nft-showcase">
-        <h3>NFT 展柜</h3>
+        <h3>藏品 展柜</h3>
         
         <div v-if="searchResult.displayed_nfts_details && searchResult.displayed_nfts_details.length > 0">
           <div class="tabs" v-if="profileSortedNftTypes.length > 1">
@@ -191,7 +191,7 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        <p v-else class="empty-state">{{ searchResult.username }} 还没有展出任何NFT。</p>
+        <p v-else class="empty-state">{{ searchResult.username }} 还没有展出任何藏品。</p>
         </div>
     </div>
   </div>

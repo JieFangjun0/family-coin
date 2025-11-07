@@ -16,7 +16,7 @@ from backend.api import routes_admin
 from backend.api import routes_notifications
 
 app = FastAPI(
-    title="FamilyCoin API (V0.4.0 - Refactored)",
+    title="JCoin API (V0.4.0 - Refactored)",
     description="一个用于家庭和朋友的中心化玩具加密货币API (已解耦)",
     version="0.4.0"
 )

@@ -1,7 +1,8 @@
 <script setup>
 import { reactive, computed, ref, onUnmounted, onMounted } from 'vue'
 import { formatTimestamp, formatCurrency } from '@/utils/formatters'
-
+import { useEconomicsStore } from '@/stores/economics.js'
+import { apiCall } from '@/api'
 const props = defineProps({
   nft: { type: Object, required: true },
   context: { type: String, default: 'collection' },
@@ -10,9 +11,11 @@ const props = defineProps({
 
 const emit = defineEmits(['action'])
 
-// --- V3: 经济配置 (硬编码以匹配后端) ---
-const HARVEST_COOLDOWN_SECONDS = 4 * 3600;
-const SCAN_COST = 10.0;
+// --- V3: 经济配置 (从 Store 解耦) ---
+const econStore = useEconomicsStore()
+const planetEcon = computed(() => econStore.configs.PLANET || {})
+const HARVEST_COOLDOWN_SECONDS = computed(() => planetEcon.value.HARVEST_COOLDOWN_SECONDS || 3600)
+const SCAN_COST = computed(() => planetEcon.value.SCAN_COST || 10.0)
 
 // --- 响应式表单 ---
 const form = reactive({
@@ -30,18 +33,33 @@ const form = reactive({
   }
 })
 
-// --- V3: 计时器和产出计算 ---
-const now = ref(Date.now() / 1000)
-let timer;
+// --- V3: JPH 实时轮询 ---
+const accumulatedJph = ref(0.0)
+const isReadyToHarvest = ref(false)
+const cooldownLeftSeconds = ref(0)
+let pollTimer = null;
+
+async function pollJphStatus() {
+  if (!props.nft || !props.nft.nft_id) return;
+  
+  // (仅当组件在屏幕上时才轮询 - 可选优化)
+  // if (document.hidden) return; 
+
+  const [data, error] = await apiCall('GET', `/nfts/${props.nft.nft_id}/jph_status`);
+  if (data) {
+    accumulatedJph.value = data.accumulated_jph;
+    isReadyToHarvest.value = data.is_ready;
+    cooldownLeftSeconds.value = data.cooldown_left_seconds;
+  }
+}
 
 onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Date.now() / 1000
-  }, 1000)
+  pollJphStatus(); // 立即调用一次
+  pollTimer = setInterval(pollJphStatus, 5000); // 设置每 5 秒轮询
 })
 
 onUnmounted(() => {
-  clearInterval(timer)
+  clearInterval(pollTimer); // 清除计时器
 })
 
 const nftData = computed(() => props.nft.data || {})
@@ -58,14 +76,18 @@ const unlockedTraitNames = computed(() => {
 })
 
 const jph = computed(() => economic_stats.value.total_jph || 0)
-const last_harvest_time = computed(() => nftData.value.last_harvest_time || 0)
-const next_harvest_time = computed(() => last_harvest_time.value + HARVEST_COOLDOWN_SECONDS)
-const can_harvest = computed(() => jph.value > 0 && now.value > next_harvest_time.value)
 
 const harvest_cooldown_str = computed(() => {
     if (jph.value <= 0) return '不可开采';
-    const timeLeftSeconds = Math.max(0, next_harvest_time.value - now.value);
-    if (timeLeftSeconds === 0) return '可以丰收';
+    
+    // 使用来自 API 的 isReadyToHarvest
+    if (isReadyToHarvest.value) {
+      return `可收获 (已积累: ${accumulatedJph.value.toFixed(4)} JCoin)`;
+    }
+    
+    // 使用来自 API 的 cooldownLeftSeconds
+    const timeLeftSeconds = cooldownLeftSeconds.value;
+    if (timeLeftSeconds <= 0) return '正在计算...';
 
     const hours = Math.floor(timeLeftSeconds / 3600)
     const minutes = Math.floor((timeLeftSeconds % 3600) / 60)
@@ -99,7 +121,7 @@ function handleScan() {
     })
 }
 
-// --- V3: 新增丰收动作 ---
+// --- V3: 新增收获动作 ---
 function handleHarvest() {
     emit('action', 'harvest', {})
 }
@@ -232,7 +254,7 @@ export function getSearchableText(data) {
           <li><strong>星球类型:</strong> {{ nftData.planet_type || 'N/A' }}</li>
           
           <li class="jph-line"><strong>资源产出:</strong> 💰 {{ formatCurrency(jph) }} JCoin / 小时</li>
-          <li class="harvest-line"><strong>丰收状态:</strong> 
+          <li class="harvest-line"><strong>收获状态:</strong> 
             <span :class="{ 'ready': can_harvest, 'cooldown': !can_harvest }">
               {{ harvest_cooldown_str }}
             </span>
@@ -246,18 +268,17 @@ export function getSearchableText(data) {
       <template v-if="context === 'collection' && nft.data">
         
         <div class="action-form harvest-form" v-if="jph > 0">
-            <h4>⛏️ 资源丰收</h4>
-            <p class="help-text">收集该行星累积的 JCoin。冷却时间: {{ HARVEST_COOLDOWN_SECONDS / 3600 }} 小时。</p>
+            <h4>⛏️ 资源收获</h4>
+            <p class="help-text">收集该行星累积的 JCoin。冷却时间: {{ (HARVEST_COOLDOWN_SECONDS / 3600).toFixed(1) }} 小时。</p>
             <form @submit.prevent="handleHarvest">
-                <button type="submit" :disabled="!can_harvest">
-                  {{ can_harvest ? '立即丰收' : '冷却中...' }}
+                <button type="submit" :disabled="!isReadyToHarvest">
+                  {{ isReadyToHarvest ? `立即收获 (已积累: ${accumulatedJph.toFixed(4)} JCoin)` : harvest_cooldown_str }}
                 </button>
             </form>
         </div>
-
         <div v-if="nftData.anomalies?.length" class="action-form">
             <h4>🛰️ 扫描异常信号</h4>
-            <p class="help-text">消耗 {{ SCAN_COST.toFixed(1) }} FC 进行深度扫描，可能会有惊人发现。</p>
+            <p class="help-text">消耗 {{ SCAN_COST.toFixed(1) }} JCoin 进行深度扫描，可能会有惊人发现。</p>
             <form @submit.prevent="handleScan">
                 <div class="form-group">
                     <select v-model="form.scan.selectedAnomaly">
@@ -292,7 +313,7 @@ export function getSearchableText(data) {
               </select>
             </div>
             <div class="form-group">
-                <label>{{ form.list.listing_type === 'SALE' ? '价格 (FC)' : '起拍价 (FC)' }}</label>
+                <label>{{ form.list.listing_type === 'SALE' ? '价格 (JCoin)' : '起拍价 (JCoin)' }}</label>
                 <input type="number" v-model.number="form.list.price" min="0.01" step="0.01" required />
             </div>
             <div class="form-group" v-if="form.list.listing_type === 'AUCTION'">
@@ -311,7 +332,7 @@ export function getSearchableText(data) {
 .nft-header { border-bottom: 1px solid #e2e8f0; margin: 0; }
 .action-form { border-top: 1px solid #f0f2f5; }
 .sell-form { background: #f7fafc; }
-.harvest-form { background: #f0fff4; } /* 丰收表单用绿色背景 */
+.harvest-form { background: #f0fff4; } /* 收获表单用绿色背景 */
 h3, h4 { margin: 0; margin-bottom: 0.75rem; }
 h4 { font-size: 1rem; }
 .nft-name { margin-top: 0.75rem; font-size: 1.25rem; color: #2d3748; }

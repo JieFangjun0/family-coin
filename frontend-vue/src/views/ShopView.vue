@@ -291,7 +291,7 @@ async function fetchSeekListings(search_term = null) {
 async function fetchAllNftTypes() {
   isLoading.value.allTypes = true
   const [data, error] = await apiCall('GET', '/nfts/display_names')
-  if (error) errorMessage.value = `无法加载NFT类型: ${error}`
+  if (error) errorMessage.value = `无法加载藏品类型: ${error}`
   else {
     allNftTypes.value = data
     if (!seekForm.nft_type && Object.keys(data).length > 0) {
@@ -306,7 +306,7 @@ async function fetchMyNfts() {
   const [data, error] = await apiCall('GET', '/nfts/my', {
     params: { public_key: authStore.userInfo.publicKey }
   })
-  if (error) errorMessage.value = `无法加载我的NFT: ${error}`
+  if (error) errorMessage.value = `无法加载我的藏品: ${error}`
   else myNfts.value = data.nfts
   isLoading.value.myNfts = false
 }
@@ -518,7 +518,7 @@ async function handleMakeOffer(item) {
   errorMessage.value = null
   const offeredNftId = offerForms[item.listing_id]
   if (!offeredNftId) {
-    errorMessage.value = '请选择一个你拥有的NFT进行报价'
+    errorMessage.value = '请选择一个你拥有的藏品进行报价'
     return
   }
   const message = {
@@ -621,7 +621,7 @@ onMounted(() => {
     <div v-if="activeTab === 'mint'" class="tab-content">
       <div v-if="isLoading.mint" class="loading-state">正在加载藏品创造界面...</div>
       <div v-else-if="!sortedCreatableTypes || sortedCreatableTypes.length === 0" class="empty-state">
-        当前没有可通过商店创造的NFT类型。
+        当前没有可通过商店创造的藏品类型。
       </div>
       <div v-else>
         <div class="tabs sub-tabs" v-if="sortedCreatableTypes.length > 1">
@@ -819,10 +819,10 @@ onMounted(() => {
     <div v-if="activeTab === 'seek'" class="tab-content">
       <div class="seek-create-form">
         <h3>发布求购信息</h3>
-        <p class="subtitle">发布一个求购单，让拥有你所需 NFT 的人来找你。发布时将暂时托管你的预算资金。</p>
+        <p class="subtitle">发布一个求购单，让拥有你所需 藏品 的人来找你。发布时将暂时托管你的预算资金。</p>
         <form @submit.prevent="handleCreateSeekListing">
           <div class="form-group">
-            <label>求购的 NFT 类型</label>
+            <label>求购的 藏品 类型</label>
             <select v-model="seekForm.nft_type" :disabled="isLoading.allTypes">
               <option v-if="isLoading.allTypes" value="">加载中...</option>
               <option v-for="(name, type) in allNftTypes" :key="type" :value="type">{{ name }}</option>
@@ -877,9 +877,9 @@ onMounted(() => {
               </ul>
               
               <form v-if="item.lister_key !== authStore.userInfo.publicKey" class="buy-action" @submit.prevent="handleMakeOffer(item)">
-                <p class="help-text">选择一个你拥有的、符合类型的NFT进行报价：</p>
+                <p class="help-text">选择一个你拥有的、符合类型的藏品进行报价：</p>
                 <template v-if="isLoading.myNfts">
-                  <div class="loading-state-small">正在加载你的NFT...</div>
+                  <div class="loading-state-small">正在加载你的藏品...</div>
                 </template>
                 <template v-else-if="computedEligibleNfts(item.nft_type).length > 0">
                   <div class="form-group small-form-group">
@@ -895,7 +895,7 @@ onMounted(() => {
                   </button>
                 </template>
                 <div v-else class="empty-state-small">
-                  你没有符合条件的NFT
+                  你没有符合条件的藏品
                 </div>
               </form>
               <div v-else class="buy-action empty-state-small">
