@@ -133,9 +133,9 @@ def init_db():
             
             system_accounts = [
                 # (public_key, uid, username, password_hash, invited_by, is_bot)
-                (GENESIS_ACCOUNT, "SYS_G", "SYSTEM_GENESIS", "!", "SYSTEM", True),
-                (BURN_ACCOUNT, "SYS_B", "SYSTEM_BURN", "!", "SYSTEM", True),
-                (ESCROW_ACCOUNT, "SYS_E", "SYSTEM_ESCROW", "!", "SYSTEM", True),
+                (GENESIS_ACCOUNT, "SYS_G", "SYSTEM_GENESIS", "!", "SYSTEM", False),
+                (BURN_ACCOUNT, "SYS_B", "SYSTEM_BURN", "!", "SYSTEM", False),
+                (ESCROW_ACCOUNT, "SYS_E", "SYSTEM_ESCROW", "!", "SYSTEM", False),
             ]
             insert_query = """
                 INSERT INTO users 

@@ -161,7 +161,7 @@ def get_all_bots(include_inactive=False) -> list:
                     b.balance
                 FROM users u
                 LEFT JOIN balances b ON u.public_key = b.public_key
-                WHERE u.is_bot = TRUE
+                WHERE u.is_bot = TRUE AND u.bot_type IS NOT NULL
             """
             if not include_inactive:
                 query += " AND u.is_active = TRUE"
