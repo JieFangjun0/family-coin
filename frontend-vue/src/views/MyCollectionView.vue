@@ -5,26 +5,25 @@ import { apiCall } from '@/api'
 import { createSignedPayload } from '@/utils/crypto'
 import NftCard from '@/components/nfts/NftCard.vue'
 import { nftRendererRegistry, defaultRenderer } from '@/components/nfts/renderer-registry.js'
+
 const authStore = useAuthStore()
 const nfts = ref([])
 const isLoading = ref(true)
 const errorMessage = ref(null)
 const successMessage = ref(null)
 
-// --- 修复问题 3: 新增状态 ---
+// 存储每个 NftCard 的局部反馈消息
+// 结构: { "nft-id-123": { text: "...", type: "success" } }
+const localFeedback = ref({});
+
 const activeTab = ref(null)
 const nftDisplayNames = ref({})
-// +++ 核心修改：新增搜索状态 +++
 const searchTerm = ref('')
-// +++ 核心修改结束 +++
-// --- 修复结束 ---
 
 async function fetchNfts() {
   isLoading.value = true
   errorMessage.value = null
-  // successMessage.value = null; // Don't clear success message on auto-refresh
-
-  // --- 修复问题 3: 并行获取藏品s和类型名称 ---
+  
   const [nftResult, typesResult] = await Promise.all([
     apiCall('GET', '/nfts/my', {
       params: { public_key: authStore.userInfo.publicKey }
@@ -45,65 +44,48 @@ async function fetchNfts() {
   } else {
     nftDisplayNames.value = typesData
   }
-  // --- 修复结束 ---
 
   isLoading.value = false
 }
 
-// 本地过滤的计算属性（解耦方式：字符串化搜索） +++
 const filteredNfts = computed(() => {
     const term = searchTerm.value.toLowerCase().trim()
     if (!term) return nfts.value
     
     return nfts.value.filter(nft => {
         const data = nft.data || {}
-        
-        // 1. 获取特定类型的搜索函数
-        // 如果未在注册表中找到，则使用 defaultRenderer 的函数
         const handler = nftRendererRegistry[nft.nft_type] || defaultRenderer
         const getSpecificSearchText = handler.getSearchableText
         
-        // 2. 构建可搜索文本
         const searchableText = [
-            // A. 通用文本 (所有 NFT 都有的)
             nft.nft_type,
-            (nftDisplayNames.value[nft.nft_type] || ''), // NFT类型中文名
+            (nftDisplayNames.value[nft.nft_type] || ''), 
             nft.nft_id.substring(0, 8),
-            
-            // B. Data 中的通用字段 (约定俗成的)
-            data.custom_name, // (例如 Planet 的)
-            data.name, // (例如 Default 的)
-            data.description, // (例如 SecretWish 的)
-            data.nickname, // (例如 BioDna 的)
-            data.species_name, // (例如 BioDna 的)
-            
-            // C. (核心) 调用特定渲染器的函数，获取翻译后的文本
+            data.custom_name, 
+            data.name,
+            data.description,
+            data.nickname,
+            data.species_name,
             getSpecificSearchText(data) 
         ]
-        .filter(Boolean) // 移除空值 (null, undefined, '')
+        .filter(Boolean)
         .join(' ')
         .toLowerCase();
         
-        // D. (回退) 添加原始 JSON 字符串以防万一
         const rawDataString = JSON.stringify(data).toLowerCase();
 
-        // 3. 执行搜索 (在组合文本或原始数据中查找)
         return searchableText.includes(term) || rawDataString.includes(term)
     })
 })
 
-
-// --- 修复问题 3: 更新 Computed 属性以使用过滤后的列表 ---
 const nftsByType = computed(() => {
   const groups = {}
-  // 核心：使用过滤后的列表进行分组
   for (const nft of filteredNfts.value) { 
     if (!groups[nft.nft_type]) {
       groups[nft.nft_type] = []
     }
     groups[nft.nft_type].push(nft)
   }
-  // 自动设置激活的 tab
   const sortedKeys = Object.keys(groups).sort()
   if (activeTab.value === null || !sortedKeys.includes(activeTab.value)) {
     activeTab.value = sortedKeys.length > 0 ? sortedKeys[0] : null
@@ -114,23 +96,21 @@ const nftsByType = computed(() => {
 const sortedNftTypes = computed(() => {
     return Object.keys(nftsByType.value).sort()
 })
-// --- 修复结束 ---
-
 
 async function handleNftAction(event) {
     const { action, nft, payload } = event;
+
+    // 清空此 NFT 的局部消息和全局消息
+    localFeedback.value[nft.nft_id] = null;
     successMessage.value = null;
     errorMessage.value = null;
 
-    // 1. “上架”动作有单独的逻辑，因为它调用不同的 API
     if (action === 'list-for-sale') {
-        // handleCreateListing 内部会调用 fetchNfts()，
-        // 这是正确的，因为 NFT 会离开“我的收藏”。
+        // handleCreateListing 会设置自己的局部消息
         await handleCreateListing(nft, payload);
         return;
     }
 
-    // 2. 处理所有其他动作 (rename, scan, harvest, train, breed, destroy)
     const isDestructiveAction = (action === 'destroy');
 
     const message = {
@@ -143,83 +123,107 @@ async function handleNftAction(event) {
 
     const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
     if (!signedPayload) {
-        errorMessage.value = '创建签名失败';
+        const msg = '创建签名失败';
+        errorMessage.value = msg;
+        localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
         return;
     }
 
-    // 调用通用的 /nfts/action 接口
     const [data, error] = await apiCall('POST', '/nfts/action', { payload: signedPayload });
 
     if (error) {
-        errorMessage.value = `操作失败: ${error}`;
+        const msg = `操作失败: ${error}`;
+        errorMessage.value = msg;
+        localFeedback.value[nft.nft_id] = { text: `操作失败: ${error}`, type: 'error' };
     } else {
-        successMessage.value = data.detail || '操作成功!';
+        const msg = data.detail || '操作成功!';
+        successMessage.value = msg;
+        localFeedback.value[nft.nft_id] = { text: msg, type: 'success' };
+        
         if (isDestructiveAction) {
-            // 如果是销毁，我们从本地列表中移除它
             nfts.value = nfts.value.filter(item => item.nft_id !== nft.nft_id);
         } else {
-            // 如果是修改 (scan, rename, harvest, train, breed)...
-            // 我们只获取这一个 NFT 的新数据来更新它
             const [updatedNft, nftError] = await apiCall('GET', `/nfts/${nft.nft_id}`);
             if (updatedNft) {
-                // 找到它在列表中的索引
                 const index = nfts.value.findIndex(item => item.nft_id === nft.nft_id);
                 if (index !== -1) {
-                    // 原地替换数据，这不会导致组件重建
                     nfts.value[index] = updatedNft;
                 } else {
-                    // 如果找不到（理论上不该发生），则回退到完整刷新
                     await fetchNfts();
                 }
             } else {
-                // 如果获取单个 NFT 失败，也回退到完整刷新
                 await fetchNfts();
             }
         }
     }
+    
+    // 5秒后自动清除此 NFT 的局部消息
+    setTimeout(() => {
+        if (localFeedback.value[nft.nft_id]) {
+            localFeedback.value[nft.nft_id] = null;
+        }
+    }, 5000);
 }
 
-// *** 核心修改：此函数现在支持一口价和拍卖 ***
 async function handleCreateListing(nft, payload) {
-  // 从 payload 中解构新参数，并提供默认值
+  // 清空此 NFT 的局部消息
+  localFeedback.value[nft.nft_id] = null;
+  
   const { 
     description, 
     price, 
-    listing_type = 'SALE', // 默认为 SALE
-    auction_hours = null   // 默认为 null
+    listing_type = 'SALE', 
+    auction_hours = null
   } = payload
   
   if (!price || price <= 0) {
-    errorMessage.value = '价格必须大于 0'
+    const msg = '价格必须大于 0';
+    errorMessage.value = msg;
+    localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
     return
   }
   
   if (listing_type === 'AUCTION' && (!auction_hours || auction_hours <= 0)) {
-    errorMessage.value = '拍卖小时数必须大于 0'
+    const msg = '拍卖小时数必须大于 0';
+    errorMessage.value = msg;
+    localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
     return
   }
 
   const message = {
     owner_key: authStore.userInfo.publicKey,
     timestamp: Math.floor(Date.now() / 1000),
-    listing_type: listing_type, // 使用新参数
+    listing_type: listing_type, 
     nft_id: nft.nft_id,
     nft_type: nft.nft_type,
     description: description,
     price: price,
-    auction_hours: listing_type === 'AUCTION' ? auction_hours : null // 仅在拍卖时传递
+    auction_hours: listing_type === 'AUCTION' ? auction_hours : null
   }
 
   const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message)
   if (!signedPayload) {
-    errorMessage.value = '创建签名失败'
+    const msg = '创建签名失败';
+    errorMessage.value = msg;
+    localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
     return
   }
 
   const [data, error] = await apiCall('POST', '/market/create_listing', { payload: signedPayload })
   if (error) {
-    errorMessage.value = `上架失败: ${error}`
+    const msg = `上架失败: ${error}`;
+    errorMessage.value = msg;
+    localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
+
+    // 5秒后自动清除此 NFT 的局部消息
+    setTimeout(() => {
+        if (localFeedback.value[nft.nft_id]) {
+            localFeedback.value[nft.nft_id] = null;
+        }
+    }, 5000);
+
   } else {
+    // 上架成功后，卡片会消失，所以局部消息不重要，只显示全局消息
     successMessage.value = `上架成功！${data.detail || ''}`
     await fetchNfts()
   }
@@ -249,6 +253,7 @@ onMounted(fetchNfts)
     <div v-if="!isLoading && filteredNfts.length === 0 && nfts.length > 0" class="empty-state">
         没有找到与 “{{ searchTerm }}” 匹配的 藏品。
     </div>
+    
     <div v-if="!isLoading && filteredNfts.length > 0">
       <div class="tabs" v-if="sortedNftTypes.length > 1">
         <button
@@ -268,6 +273,7 @@ onMounted(fetchNfts)
             :key="nft.nft_id" 
             :nft="nft"
             @action="handleNftAction"
+            :local-feedback-message="localFeedback[nft.nft_id]" 
           />
         </div>
       </div>
@@ -281,62 +287,26 @@ onMounted(fetchNfts)
 .subtitle { color: #718096; margin-bottom: 2rem; }
 .loading-state, .empty-state { text-align: center; padding: 3rem; color: #718096; font-size: 1.1rem; }
 
-/* --- 修复问题 3: 新增 Tab 样式 --- */
-.tabs { 
-    display: flex; 
-    gap: 0.5rem; 
-    margin-bottom: 1.5rem; 
-    border-bottom: 2px solid #e2e8f0;
-    flex-wrap: wrap;
-}
-.tabs button { 
-    padding: 0.75rem 1rem; 
-    border: none; 
-    background: none; 
-    font-size: 1rem; 
-    font-weight: 600; 
-    color: #718096; 
-    cursor: pointer; 
-    border-bottom: 4px solid transparent; 
-    transform: translateY(2px); 
-    transition: color 0.2s, border-color 0.2s;
-}
+.tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid #e2e8f0; flex-wrap: wrap; }
+.tabs button { padding: 0.75rem 1rem; border: none; background: none; font-size: 1rem; font-weight: 600; color: #718096; cursor: pointer; border-bottom: 4px solid transparent; transform: translateY(2px); transition: color 0.2s, border-color 0.2s; }
 .tabs button:hover { color: #4a5568; }
 .tabs button.active { color: #42b883; border-bottom-color: #42b883; }
-.tab-content {
-  animation: fadeIn 0.3s;
-}
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-/* --- 修复结束 --- */
+.tab-content { animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* +++ 核心修改：新增搜索栏样式 +++ */
-.search-bar {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-}
-.search-bar input {
-    width: 100%;
-    padding: 0.75rem;
-    border-radius: 6px;
-    border: 1px solid #cbd5e0;
-    box-sizing: border-box;
-}
-/* +++ 核心修改结束 +++ */
+.search-bar { margin-bottom: 2rem; padding: 1.5rem; background: #fff; border-radius: 8px; border: 1px solid #e2e8f0; }
+.search-bar input { width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid #cbd5e0; box-sizing: border-box; }
 
-
-.nft-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-  gap: 1.5rem;
-}
+.nft-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1.5rem; }
 
 .message { padding: 1rem; border-radius: 4px; text-align: center; font-weight: 500; margin-bottom: 1rem;}
 .success { color: #155724; background-color: #d4edda; }
 .error { color: #d8000c; background-color: #ffbaba; }
+
+/* 为 NftCard 内部的局部反馈添加动画 
+  我们使用 :deep() 来穿透 NftCard 的 scoped 样式
+*/
+:deep(.local-feedback) {
+  animation: fadeIn 0.3s;
+}
 </style>
