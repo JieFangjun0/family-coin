@@ -78,37 +78,45 @@ def create_market_listing(lister_key: str, listing_type: str, nft_id: str, nft_t
             conn.rollback()
             return False, f"创建挂单失败: {e}"
 
+def cancel_market_listing_in_tx(conn, lister_key: str, listing_id: str) -> (bool, str):
+    """(内部函数) 取消挂单的核心逻辑，在事务中运行。"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM market_listings WHERE listing_id = ? AND lister_key = ? AND status = 'ACTIVE'", (listing_id, lister_key))
+        listing = cursor.fetchone()
+        if not listing: return False, "未找到您的有效挂单"
+
+        if listing['listing_type'] in ['SALE', 'AUCTION']:
+            success, detail = _change_nft_owner(listing['nft_id'], lister_key, conn)
+            if not success:
+                # 不回滚，让调用者决定
+                return False, f"退还NFT失败: {detail}"
+
+        elif listing['listing_type'] == 'SEEK':
+            cursor.execute("SELECT 1 FROM market_offers WHERE listing_id = ? AND status = 'ACCEPTED'", (listing_id,))
+            if cursor.fetchone():
+                return False, "已有报价被接受，无法取消此求购"
+
+            success, detail = _create_system_transaction(ESCROW_ACCOUNT, lister_key, listing['price'], f"取消求购，退回资金", conn)
+            if not success:
+                # 不回滚
+                return False, f"退还资金失败: {detail}"
+
+        cursor.execute("UPDATE market_listings SET status = 'CANCELLED' WHERE listing_id = ?", (listing_id,))
+        return True, "挂单已取消"
+    except Exception as e:
+        return False, f"取消挂单逻辑失败: {e}"
+
 def cancel_market_listing(lister_key: str, listing_id: str) -> (bool, str):
-    """取消一个挂单。"""
+    """(公共接口) 取消一个挂单。"""
     with LEDGER_LOCK, get_db_connection() as conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM market_listings WHERE listing_id = ? AND lister_key = ? AND status = 'ACTIVE'", (listing_id, lister_key))
-            listing = cursor.fetchone()
-            if not listing: return False, "未找到您的有效挂单"
-
-            if listing['listing_type'] in ['SALE', 'AUCTION']:
-                success, detail = _change_nft_owner(listing['nft_id'], lister_key, conn)
-                if not success:
-                    conn.rollback()
-                    return False, f"退还NFT失败: {detail}"
-
-            elif listing['listing_type'] == 'SEEK':
-                cursor.execute("SELECT 1 FROM market_offers WHERE listing_id = ? AND status = 'ACCEPTED'", (listing_id,))
-                if cursor.fetchone():
-                    return False, "已有报价被接受，无法取消此求购"
-
-                success, detail = _create_system_transaction(ESCROW_ACCOUNT, lister_key, listing['price'], f"取消求购，退回资金", conn)
-                if not success:
-                    conn.rollback()
-                    return False, f"退还资金失败: {detail}"
-
-            cursor.execute("UPDATE market_listings SET status = 'CANCELLED' WHERE listing_id = ?", (listing_id,))
+        # 调用事务安全的新函数
+        success, detail = cancel_market_listing_in_tx(conn, lister_key, listing_id)
+        if success:
             conn.commit()
-            return True, "挂单已取消"
-        except Exception as e:
+        else:
             conn.rollback()
-            return False, f"取消挂单失败: {e}"
+        return success, detail
 
 def execute_sale(buyer_key: str, listing_id: str) -> (bool, str):
     """执行一个直接购买操作。"""

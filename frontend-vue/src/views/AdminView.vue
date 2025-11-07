@@ -93,7 +93,7 @@ watch(adminSecret, (newValue) => {
   localStorage.setItem('adminSecret', newValue)
 })
 
-// 当NFT类型改变时，加载对应的帮助信息和默认JSON
+// 当藏品类型改变时，加载对应的帮助信息和默认JSON
 watch(() => forms.mintNft.nft_type, async (newType) => {
   if (!newType || !adminSecret.value) return;
   
@@ -156,8 +156,8 @@ async function fetchData() {
   if (balancesRes[1]) errorMessage.value = `加载余额列表失败: ${balancesRes[1]}`
   else allBalances.value = balancesRes[0].balances.sort((a, b) => a.username.localeCompare(b.username));
 
-  // 处理NFT类型
-  if (nftTypesRes[1]) errorMessage.value = `加载NFT类型失败: ${nftTypesRes[1]}`
+  // 处理藏品类型
+  if (nftTypesRes[1]) errorMessage.value = `加载藏品类型失败: ${nftTypesRes[1]}`
   else {
     nftTypes.value = nftTypesRes[0]
     if (nftTypes.value.length > 0 && !forms.mintNft.nft_type) {
@@ -470,7 +470,7 @@ async function handleMintNft() {
   }
   
   if (!forms.mintNft.to_key || !forms.mintNft.nft_type) {
-      errorMessage.value = "请选择接收用户和 NFT 类型。";
+      errorMessage.value = "请选择接收用户和 藏品 类型。";
       return;
   }
 
@@ -482,10 +482,10 @@ async function handleMintNft() {
   
   const success = await handleApiCall(
     apiCall('POST', '/admin/nft/mint', { payload, headers: adminHeaders.value }),
-    'NFT 铸造成功！',
-    'NFT 铸造失败'
+    '藏品 创造成功！',
+    '藏品 创造失败'
   );
-  // (成功后不重置表单，方便管理员连续铸造)
+  // (成功后不重置表单，方便管理员连续创造)
 }
 
 async function handleNukeSystem() {
@@ -533,6 +533,8 @@ async function handleCreateBot() {
 }
 
 function openBotManager(bot) {
+  errorMessage.value = null; // <-- 添加此行
+  successMessage.value = null; // <-- 添加此行
   forms.bots.manage.public_key = bot.public_key;
   forms.bots.manage.new_probability = bot.action_probability;
   forms.bots.manage.issue_amount = 100;
@@ -755,7 +757,7 @@ onMounted(() => {
           </form>
         </div>
 
-        <h3 class="divider-header">精细管理 (人类)</h3>
+        <h3 class="divider-header">精细管理</h3>
         <div class="form-group">
           <label>选择要管理的用户</label>
           <select v-model="forms.burn.from_key">
@@ -803,18 +805,18 @@ onMounted(() => {
           </form>
         </div>
         
-        <h3 class="divider-header">NFT 铸造 (人类)</h3>
+        <h3 class="divider-header">藏品 创造</h3>
         <form @submit.prevent="handleMintNft" class="admin-form">
           <div class="grid-2-col">
               <div class="form-group">
                   <label>接收用户</label>
                   <select v-model="forms.mintNft.to_key">
-                      <option disabled value="">-- 选择人类用户 --</option>
+                      <option disabled value="">-- 选择用户 --</option>
                       <option v-for="opt in userOptions" :key="opt.value" :value="opt.value">{{ opt.text }}</option>
                   </select>
               </div>
               <div class="form-group">
-                  <label>NFT 类型</label>
+                  <label>藏品 类型</label>
                   <select v-model="forms.mintNft.nft_type">
                       <option v-for="type in nftTypes" :key="type" :value="type">{{ type }}</option>
                   </select>
@@ -825,7 +827,7 @@ onMounted(() => {
               <p class="help-text">{{ nftMintHelpText }}</p>
               <textarea v-model="forms.mintNft.data" rows="8" :key="forms.mintNft.nft_type"></textarea>
             </div>
-            <button type="submit">确认铸造</button>
+            <button type="submit">确认创造</button>
         </form>
       </div>
 
@@ -962,7 +964,7 @@ onMounted(() => {
           </table>
         </div>
 
-        <h3 class="divider-header">NFT 铸造 (机器人)</h3>
+        <h3 class="divider-header">藏品 创造 (机器人)</h3>
         <form @submit.prevent="handleMintNft" class="admin-form">
           <div class="grid-2-col">
               <div class="form-group">
@@ -973,7 +975,7 @@ onMounted(() => {
                   </select>
               </div>
               <div class="form-group">
-                  <label>NFT 类型</label>
+                  <label>藏品 类型</label>
                   <select v-model="forms.mintNft.nft_type">
                       <option v-for="type in nftTypes" :key="type" :value="type">{{ type }}</option>
                   </select>
@@ -984,7 +986,7 @@ onMounted(() => {
               <p class="help-text">{{ nftMintHelpText }}</p>
               <textarea v-model="forms.mintNft.data" rows="8" :key="forms.mintNft.nft_type"></textarea>
             </div>
-            <button type="submit">确认铸造</button>
+            <button type="submit">确认创造</button>
         </form>
 
       </div>
@@ -1084,7 +1086,7 @@ onMounted(() => {
         <button class="close-button" @click="closeBotManager">×</button>
         <h2>管理机器人: {{ showBotManager.username }}</h2>
         <p class="help-text">UID: {{ showBotManager.uid }}</p>
-
+        <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
         <div class="grid-2-col">
           <form @submit.prevent="handleSetBotProbability">
             <h3>调整概率</h3>

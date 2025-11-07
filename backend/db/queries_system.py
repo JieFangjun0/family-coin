@@ -7,7 +7,7 @@ from backend.db.database import (
     DATABASE_PATH, GENESIS_ACCOUNT, BURN_ACCOUNT, init_db
 )
 # 导入市场查询是为了 admin_purge_user
-from backend.db.queries_market import cancel_market_listing
+from backend.db.queries_market import cancel_market_listing_in_tx
 
 def count_users() -> int:
     """统计数据库中的用户总数。"""
@@ -156,9 +156,10 @@ def admin_purge_user(public_key: str) -> (bool, str):
             cursor.execute("SELECT listing_id FROM market_listings WHERE lister_key = ? and status = 'ACTIVE'", (public_key,))
             user_listings = cursor.fetchall()
             for listing in user_listings:
-                # We need to call the function with its full path
-                _success, _detail = cancel_market_listing(public_key, listing['listing_id'])
+                # 调用事务安全函数并传入当前连接
+                _success, _detail = cancel_market_listing_in_tx(conn, public_key, listing['listing_id'])
                 if not _success:
+                    # 仍然只是打印警告，而不是中止整个清除过程
                     print(f"Warning: Purging user, failed to cancel listing {listing['listing_id']}: {_detail}")
 
             cursor.execute("UPDATE market_offers SET status = 'REJECTED' WHERE listing_id IN (SELECT listing_id FROM market_listings WHERE lister_key = ?) AND status = 'PENDING'", (public_key,))
