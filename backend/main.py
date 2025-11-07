@@ -39,7 +39,12 @@ async def on_startup():
         # 2. 然后，使用该连接池初始化表
         print("正在启动 API ... 初始化数据库表...")
         database.init_db() # (原为 init_db())
-    
+        print("--- 正在启动后台机器人调度器... ---")
+        # 将 bot_runner.run_bot_loop 放入一个单独的线程
+        # daemon=True 确保当主程序(FastAPI)退出时，该线程也会自动退出
+        bot_thread = threading.Thread(target=bot_runner.run_bot_loop, daemon=True)
+        bot_thread.start()
+        print("--- 机器人调度器已在后台线程启动。 ---")
     except Exception as e:
         print(f"!!!!!!!!!!!!!! 严重错误：数据库启动失败 !!!!!!!!!!!!!!")
         print(f"错误: {e}")

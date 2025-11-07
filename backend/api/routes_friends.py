@@ -11,8 +11,8 @@ from backend.api.dependencies import get_verified_message
 
 router = APIRouter()
 
-@router.get("/friends/status/{target_key}", response_model=FriendshipStatusResponse, tags=["Friends"])
-def api_get_friendship_status(target_key: str, current_user_key: str):
+@router.get("/friends/status", response_model=FriendshipStatusResponse, tags=["Friends"]) # <-- 移除 /{target_key}
+def api_get_friendship_status(target_key: str, current_user_key: str): # <-- 函数签名保持不变
     if not current_user_key or not target_key:
         raise HTTPException(status_code=400, detail="必须同时提供当前用户和目标用户的公钥")
     status_info = queries_user.get_friendship_status(current_user_key, target_key)

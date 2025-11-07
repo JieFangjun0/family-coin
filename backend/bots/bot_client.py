@@ -36,12 +36,13 @@ def _get_canonical_object(obj):
     return obj
 
 class BotClient:
-    def __init__(self, base_url: str, username: str, public_key: str, private_key_pem: str):
+    def __init__(self, base_url: str, username: str, public_key: str, private_key_pem: str, uid: str):
         self.base_url = base_url
         self.username = username
         self.auth_info = {
             "public_key": public_key,
-            "username": username
+            "username": username,
+            "uid": uid
         }
         
         try:

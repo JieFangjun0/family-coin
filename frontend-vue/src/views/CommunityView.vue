@@ -74,8 +74,11 @@ async function handleSearch(uidOrUsername) {
 }
 
 async function checkFriendshipStatus(targetKey) {
-  const [data, error] = await apiCall('GET', `/friends/status/${targetKey}`, {
-    params: { current_user_key: authStore.userInfo.publicKey }
+  const [data, error] = await apiCall('GET', `/friends/status`, { // <-- 移除 URL 中的 ${targetKey}
+    params: { 
+      target_key: targetKey, // <-- 将 targetKey 添加到 params 中
+      current_user_key: authStore.userInfo.publicKey 
+    }
   });
   if (error) {
     errorMessage.value = (errorMessage.value ? errorMessage.value + '\n' : '') + `无法获取好友状态: ${error}`;

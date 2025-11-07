@@ -254,13 +254,13 @@ def update_user_profile(public_key: str, signature: str, displayed_nfts: list) -
                 cursor.execute(
                     """
                     INSERT INTO user_profiles (public_key, signature, displayed_nfts, updated_at) 
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                     ON CONFLICT (public_key) DO UPDATE SET
                         signature = EXCLUDED.signature,
                         displayed_nfts = EXCLUDED.displayed_nfts,
-                        updated_at = EXCLUDED.updated_at
+                        updated_at = CURRENT_TIMESTAMP
                     """,
-                    (public_key, signature, displayed_nfts_json, time.time())
+                    (public_key, signature, displayed_nfts_json) # <-- 从这里移除了 time.time()
                 )
             
             conn.commit()

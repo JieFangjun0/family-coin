@@ -60,7 +60,8 @@ async def update_active_bots():
                 base_url=API_BASE_URL,
                 username=username,
                 public_key=bot_info['public_key'],
-                private_key_pem=bot_info['private_key_pem']
+                private_key_pem=bot_info['private_key_pem'],
+                uid=bot_info['uid']
             )
             
             _active_bots[key] = {
