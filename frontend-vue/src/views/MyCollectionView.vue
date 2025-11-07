@@ -124,7 +124,6 @@ async function handleNftAction(event) {
     const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message);
     if (!signedPayload) {
         const msg = '创建签名失败';
-        errorMessage.value = msg;
         localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
         return;
     }
@@ -133,11 +132,9 @@ async function handleNftAction(event) {
 
     if (error) {
         const msg = `操作失败: ${error}`;
-        errorMessage.value = msg;
         localFeedback.value[nft.nft_id] = { text: `操作失败: ${error}`, type: 'error' };
     } else {
         const msg = data.detail || '操作成功!';
-        successMessage.value = msg;
         localFeedback.value[nft.nft_id] = { text: msg, type: 'success' };
         
         if (isDestructiveAction) {
@@ -178,14 +175,13 @@ async function handleCreateListing(nft, payload) {
   
   if (!price || price <= 0) {
     const msg = '价格必须大于 0';
-    errorMessage.value = msg;
     localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
     return
   }
   
   if (listing_type === 'AUCTION' && (!auction_hours || auction_hours <= 0)) {
     const msg = '拍卖小时数必须大于 0';
-    errorMessage.value = msg;
+    
     localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
     return
   }
@@ -204,7 +200,7 @@ async function handleCreateListing(nft, payload) {
   const signedPayload = createSignedPayload(authStore.userInfo.privateKey, message)
   if (!signedPayload) {
     const msg = '创建签名失败';
-    errorMessage.value = msg;
+    
     localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
     return
   }
@@ -212,7 +208,7 @@ async function handleCreateListing(nft, payload) {
   const [data, error] = await apiCall('POST', '/market/create_listing', { payload: signedPayload })
   if (error) {
     const msg = `上架失败: ${error}`;
-    errorMessage.value = msg;
+    
     localFeedback.value[nft.nft_id] = { text: msg, type: 'error' };
 
     // 5秒后自动清除此 NFT 的局部消息
@@ -240,8 +236,6 @@ onMounted(fetchNfts)
     </header>
 
     <div v-if="isLoading" class="loading-state">正在加载...</div>
-    <div v-if="successMessage" class="message success">{{ successMessage }}</div>
-    <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
     
     <div class="search-bar">
       <input type="text" v-model="searchTerm" placeholder="搜索 藏品 名称、描述、类型或 ID..." />
