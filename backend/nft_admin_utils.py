@@ -1,6 +1,6 @@
 # backend/nft_admin_utils.py
 
-from backend.nft_logic import NFT_HANDLERS, get_handler
+from backend.nft_logic import NFT_HANDLERS
 
 def get_mint_info_for_type(nft_type: str) -> dict:
     """
