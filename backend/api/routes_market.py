@@ -15,7 +15,7 @@ from backend.nft_logic import NFT_HANDLERS, get_handler
 from backend.db import queries_user
 
 router = APIRouter()
-
+@router.get("/listings", tags=["Market"])
 def api_get_market_listings(listing_type: str, exclude_owner: str = None, search_term: str = None): # <-- 核心修改: 添加 search_term
     items_raw = queries_market.get_market_listings( # <--- 1. 获取原始数据
         listing_type=listing_type, 

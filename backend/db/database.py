@@ -17,6 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL 环境变量未设置！")
 
+db_pool: psycopg2.pool.SimpleConnectionPool = None
 # --- PostgreSQL 连接池 ---
 # 在应用启动时创建一次
 try:
@@ -46,12 +47,47 @@ def _generate_uid(length=8):
     """生成一个指定长度的纯数字UID。"""
     return ''.join(random.choices(string.digits, k=length))
 
+# 2. (新增) 创建一个函数来初始化连接池
+def initialize_connection_pool():
+    """
+    在 FastAPI 启动时创建数据库连接池。
+    如果失败，将引发异常并阻止应用启动。
+    """
+    global db_pool
+    if db_pool is not None:
+        return # 已经初始化
+    
+    print("--- 正在初始化数据库连接池... ---")
+    try:
+        db_pool = psycopg2.pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=20,
+            dsn=DATABASE_URL
+        )
+        # 尝试获取一个连接以验证
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+        print("--- 数据库连接池初始化成功。 ---")
+    except psycopg2.OperationalError as e:
+        print(f"!!!!!!!!!!!!!! 数据库连接失败 !!!!!!!!!!!!!!")
+        print(f"错误: {e}")
+        print(f"请检查 DATABASE_URL 和 PostgreSQL 服务是否正在运行。")
+        db_pool = None
+        # (!!! 核心修改 3 !!!)
+        # 抛出异常，让 FastAPI 启动失败，而不是静默地将 db_pool 设为 None
+        raise e
+    except Exception as e:
+        print(f"--- 数据库连接池初始化时发生未知错误: {e} ---")
+        db_pool = None
+        raise e
 # --- 数据库连接上下文 ---
 @contextmanager
 def get_db_connection():
     """获取 PostgreSQL 数据库连接的上下文管理器。"""
     if db_pool is None:
-        raise ConnectionError("数据库连接池未初始化。")
+        # 这个错误现在是致命的，说明 initialize_connection_pool 没有被调用或失败了
+        raise ConnectionError("数据库连接池未初始化。") 
     
     conn = None
     try:

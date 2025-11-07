@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 import asyncio
 import uvicorn
-from backend.db.database import init_db
+from backend.db import database
 # 导入所有 API 路由模块 (让它们先被加载和注册)
 from backend.api import routes_system
 from backend.api import routes_user
@@ -14,7 +14,7 @@ from backend.api import routes_admin
 from backend.api import routes_notifications
 
 from backend.bots import bot_runner
-
+import threading
 
 
 app = FastAPI(
@@ -28,12 +28,23 @@ async def on_startup():
     """
     应用启动时执行初始化。
     """
-    print("正在启动 API ... 初始化数据库...")
-    init_db()
     
-    print("--- API 启动：正在启动后台机器人调度器任务... ---")
-    asyncio.create_task(bot_runner.run_bot_loop())
-    print("--- API 启动：机器人任务已启动。 ---")
+    # (!!! 核心修改 2 !!!)
+    try:
+        # 1. 首先，初始化数据库连接池
+        # (这是一个同步的、阻塞的操作，在 startup 事件中是允许的)
+        # 这将在 'sleep 5' 之后运行，给了 postgres 充足的时间
+        database.initialize_connection_pool()
+        
+        # 2. 然后，使用该连接池初始化表
+        print("正在启动 API ... 初始化数据库表...")
+        database.init_db() # (原为 init_db())
+    
+    except Exception as e:
+        print(f"!!!!!!!!!!!!!! 严重错误：数据库启动失败 !!!!!!!!!!!!!!")
+        print(f"错误: {e}")
+        # 重新引发错误，以防止 Uvicorn 错误地报告 "Application startup complete"
+        raise
 
 # --- 包含所有解耦的路由 ---
 
