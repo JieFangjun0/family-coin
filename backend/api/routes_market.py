@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Dict
 from backend.db import queries_market, queries_user
-from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, BURN_ACCOUNT
+from backend.db.database import get_db_connection, _create_system_transaction, BURN_ACCOUNT
 from backend.api.models import (
     MarketSignedRequest, MarketListingRequest, SuccessResponse,
     MarketActionMessage, MarketBidRequest, BidHistoryResponse,
@@ -167,7 +167,7 @@ def api_create_nft_from_shop(request: MarketSignedRequest):
     if queries_user.get_balance(message.owner_key) < message.cost:
         raise HTTPException(status_code=400, detail="你的余额不足以支付铸造成本")
 
-    with LEDGER_LOCK, get_db_connection() as conn:
+    with get_db_connection() as conn:
         success, detail = _create_system_transaction(message.owner_key, BURN_ACCOUNT, message.cost, f"商店铸造NFT: {message.nft_type}", conn)
         if not success:
             conn.rollback()
@@ -208,7 +208,7 @@ def api_perform_shop_action(request: MarketSignedRequest):
     if queries_user.get_balance(message.owner_key) < message.cost:
         raise HTTPException(status_code=400, detail="你的余额不足以支付此操作的费用")
 
-    with LEDGER_LOCK, get_db_connection() as conn:
+    with get_db_connection() as conn:
         success, detail = _create_system_transaction(
             message.owner_key, BURN_ACCOUNT, message.cost,
             f"执行商店动作: {config.get('name', message.nft_type)}", conn

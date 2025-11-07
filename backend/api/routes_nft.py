@@ -13,7 +13,7 @@ from backend.api.models import (
 from backend.api.dependencies import get_verified_nft_action_message
 from backend.nft_logic import NFT_HANDLERS, get_handler
 # (V3 新增导入)
-from backend.db.database import LEDGER_LOCK, get_db_connection, _create_system_transaction, BURN_ACCOUNT, GENESIS_ACCOUNT
+from backend.db.database import get_db_connection, _create_system_transaction, BURN_ACCOUNT, GENESIS_ACCOUNT
 from backend.nft_logic.planet import PLANET_ECONOMICS # 导入经济配置以获取扫描成本
 from backend.nft_logic.bio_dna import PET_ECONOMICS # <<< (1) 导入灵宠经济配置
 
@@ -107,7 +107,7 @@ def api_perform_nft_action(request: NFTActionRequest):
     # (V3 核心修改：将 'scan', 'harvest', 'train', 'breed' 纳入事务处理)
     if message.action in ['scan', 'harvest', 'train', 'breed']: # <<< (2) 新增 'train', 'breed'
         
-        with LEDGER_LOCK, get_db_connection() as conn:
+        with get_db_connection() as conn:
             
             # --- 1. 处理成本 (如果是 'scan' 或 'train') ---
             cost = 0.0
@@ -161,9 +161,9 @@ def api_perform_nft_action(request: NFTActionRequest):
             try:
                 cursor = conn.cursor()
                 if new_status:
-                    cursor.execute("UPDATE nfts SET data = ?, status = ? WHERE nft_id = ?", (data_json, new_status, message.nft_id))
+                    cursor.execute("UPDATE nfts SET data = %s, status = %s WHERE nft_id = %s", (data_json, new_status, message.nft_id))
                 else:
-                    cursor.execute("UPDATE nfts SET data = ? WHERE nft_id = ?", (data_json, message.nft_id))
+                    cursor.execute("UPDATE nfts SET data = %s WHERE nft_id = %s", (data_json, message.nft_id))
                 if cursor.rowcount == 0:
                     conn.rollback()
                     raise HTTPException(status_code=500, detail="执行成功但数据更新失败: 未找到 NFT")

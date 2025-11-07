@@ -398,7 +398,7 @@ class BioDnaHandler(NFTLogicHandler):
             cursor = conn.cursor()
             
             # --- 1. 验证伴侣 ---
-            cursor.execute("SELECT data, status FROM nfts WHERE nft_id = ? AND owner_key = ?", (partner_nft_id, requester_key))
+            cursor.execute("SELECT data, status FROM nfts WHERE nft_id = %s AND owner_key = %s", (partner_nft_id, requester_key))
             partner_row = cursor.fetchone()
             
             if not partner_row: return False, "选择的伴侣NFT不存在或不属于你", {}
@@ -483,7 +483,7 @@ class BioDnaHandler(NFTLogicHandler):
             
             try:
                 cursor.execute(
-                    "UPDATE nfts SET data = ? WHERE nft_id = ?",
+                    "UPDATE nfts SET data = %s WHERE nft_id = %s",
                     (json.dumps(partner_data, ensure_ascii=False), partner_nft_id)
                 )
                 if cursor.rowcount == 0:
